@@ -1,0 +1,34 @@
+## Interface: 16001
+## Title: Hunter Trap Timer
+## Notes: Shows how long your hunter trap stays armed before it vanishes.
+## Notes-deDE: Zeigt, wie lange deine Jägerfalle noch scharf ist, bevor sie verschwindet.
+## Notes-esES: Muestra cuánto tiempo le queda armada a tu trampa de cazador antes de desaparecer.
+## Notes-esMX: Muestra cuánto tiempo le queda armada a tu trampa de cazador antes de desaparecer.
+## Notes-frFR: Affiche combien de temps votre piège de chasseur reste armé avant de disparaître.
+## Notes-itIT: Mostra per quanto tempo la tua trappola da cacciatore resta armata prima di sparire.
+## Notes-koKR: 사냥꾼 덫이 사라지기 전까지 남은 시간을 표시합니다.
+## Notes-ptBR: Mostra quanto tempo sua armadilha de caçador continua armada antes de sumir.
+## Notes-ruRU: Показывает, сколько ещё ваша ловушка охотника останется взведенной, прежде чем исчезнуть.
+## Notes-zhCN: 显示你的猎人陷阱在消失前还能保持多久。
+## Notes-zhTW: 顯示你的獵人陷阱在消失前還能維持多久。
+## Author: Nedyar
+## Version: 0.1.0
+## SavedVariables: HunterTrapTimerDB
+## IconTexture: Interface\Icons\Spell_Frost_ChainsOfIce
+
+Locales\Locales.lua
+Locales\deDE.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\frFR.lua
+Locales\itIT.lua
+Locales\koKR.lua
+Locales\ptBR.lua
+Locales\ruRU.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
+Core.lua
+Traps.lua
+Display.lua
+Options.lua
+Probe.lua
