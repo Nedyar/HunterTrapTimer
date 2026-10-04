@@ -137,7 +137,7 @@ local function CreatePage()
     intro:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -8)
     intro:SetWidth(620)
     intro:SetJustifyH("LEFT")
-    intro:SetText(L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains. In a group other players' auras could be taken for it, so there the countdown runs to its end."])
+    intro:SetText(L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains, such as a spell of yours, your pet's or your group's. In a group, an effect that comes without a spell, such as a poison, can now and then be taken for it."])
 
     CreateHeader(page, L["Icon"], 16, -110, 620)
     CreateOption(page, 16, -134, "locked", L["Lock the icon"],
@@ -145,14 +145,10 @@ local function CreatePage()
     CreateSlider(page, 24, -182, 220, "iconSize", L["Icon size"], function(value)
         return ("%d"):format(value)
     end)
-    -- The spell's name comes from the client, in its language.
-    CreateOption(page, 16, -220, "showEffect", L["Count down the effect once the trap springs"],
-        L["The icon turns green and counts down the effect on the enemy, such as the freeze of %s. It ends early if the enemy dies, and a freeze also if the enemy takes damage."]:format(
-            ns.Plain(C_Spell.GetSpellName(1499)) or "Freezing Trap"))
     local test = CreateButton(page, L["Test"], function()
         ns.Traps.Test()
     end)
-    test:SetPoint("TOPLEFT", 20, -256)
+    test:SetPoint("TOPLEFT", 20, -222)
     SetTooltip(test, L["Test"], L["Shows a trap that runs out in 15 seconds."])
     local center = CreateButton(page, L["Reset position"], function()
         ns.db.x, ns.db.y = ns.DEFAULTS.x, ns.DEFAULTS.y
@@ -160,10 +156,10 @@ local function CreatePage()
     end)
     center:SetPoint("LEFT", test, "RIGHT", 8, 0)
 
-    CreateHeader(page, L["Warning before it runs out"], 16, -306, 620)
-    CreateSlider(page, 24, -350, 220, "warnSeconds", L["Seconds left"], Seconds)
-    CreateOption(page, 16, -388, "warnFlash", L["Flash the icon"])
-    CreateOption(page, 16, -416, "warnSound", L["Play a sound"])
+    CreateHeader(page, L["Warning before it runs out"], 16, -272, 620)
+    CreateSlider(page, 24, -316, 220, "warnSeconds", L["Seconds left"], Seconds)
+    CreateOption(page, 16, -354, "warnFlash", L["Flash the icon"])
+    CreateOption(page, 16, -382, "warnSound", L["Play a sound"])
 
     return page
 end

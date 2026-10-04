@@ -6,14 +6,23 @@
 -- seconds unless something steps on it. Only one trap can be down at a time,
 -- whatever its kind (the user, 2026-10-03), so a new one replaces the old.
 --
--- That a trap sprang shows only in its effect on the enemy: an aura. The
--- icon then moves on to the effect. The aura is secret while combat
+-- A trap that springs is gone, so its countdown ends. That it sprang shows
+-- only in its effect on the enemy: an aura. The aura is secret while combat
 -- restrictions are on, and a trap that springs puts the hunter in combat at
 -- that very moment, so in practice it cannot be read (/htt probe, 2026-10-03).
 -- What does come through is that the enemy gained an aura (UNIT_AURA lists
 -- added auras, though secret). With a trap down, an aura that nothing else
--- explains is taken for the trap's effect (MayGuess). Damage to a frozen
--- enemy (UNIT_COMBAT, never secret) ends the freeze, as it does in the game.
+-- explains is taken for the trap's (Explained): a spell of the hunter's, the
+-- pet's or the group's just before explains it. In a group, effects that come
+-- with no spell (poisons, weapon procs, totems) can still be taken for the
+-- trap; the user chose to guess in groups anyway (2026-10-04). UNIT_COMBAT,
+-- never secret, gives the spell school of what an enemy takes, and a hunter
+-- and pet have no fire or frost spells but the traps, so fire damage, or a
+-- resist or immunity of the trap's school, also tells that it sprang
+-- (OnCombat).
+--
+-- The trap's effect itself is not shown: the user narrowed the addon to the
+-- armed trap's countdown (2026-10-04).
 -- /htt probe (Probe.lua) shows what the client lets through.
 local _, ns = ...
 local Plain = ns.Plain
@@ -29,49 +38,61 @@ local TICK = 0.1
 -- after the trap went down (this much earlier still counts, for rounding).
 local LEEWAY = 0.5
 
--- How long after a cast of the hunter's or the pet's an aura it puts on an
--- enemy may still turn up (shots fly), and after an enemy's own cast an aura
--- on it.
-local OWN_CAST_WINDOW = 1.5
+-- How long after a cast of the hunter's, the pet's or the group's an aura it
+-- puts on an enemy may still turn up (shots and spells fly), and after an
+-- enemy's own cast an aura on it.
+local CAST_WINDOW = 1.5
 local ENEMY_CAST_WINDOW = 1
 
--- Automatic attacks, which put no aura on the enemy: Auto Shot, Attack, Shoot.
-local NO_AURA = { [75] = true, [6603] = true, [5019] = true }
+-- Spells of the hunter's and the pet's that put no aura on an enemy, so they
+-- explain none: attacks and shots that only deal damage (in the /htt probe
+-- logs of 2026-10-04 no aura followed them), and spells on oneself or the
+-- pet. By rank 1; the other ranks match by name. Aimed Shot is left out, as
+-- it may put a healing debuff.
+local NO_AURA_SPELLS = {
+    75, 6603, 5019,                                 -- Auto Shot, Attack, Shoot
+    2973, 1495, 3044, 2643, 1510,                   -- Raptor Strike, Mongoose Bite, Arcane Shot, Multi-Shot, Volley
+    13165, 13163, 5118, 13159, 13161, 20043,        -- the aspects
+    3045, 19263, 781, 5384, 6197, 19574,            -- Rapid Fire, Deterrence, Disengage, Feign Death, Eagle Eye, Bestial Wrath
+    136, 6991, 883, 2641, 982, 1002,                -- Mend Pet, Feed Pet, Call Pet, Dismiss Pet, Revive Pet, Eyes of the Beast
+    17253, 16827, 23099, 23145, 24450,              -- the pet's Bite, Claw, Dash, Dive, Prowl
+}
+local noAura, noAuraNames = {}, {}
+for _, spellID in ipairs(NO_AURA_SPELLS) do
+    noAura[spellID] = true
+end
 
 -- Forever kept Classic's spell IDs (wowhead Forever and wow-forever.gg, build
 -- 1.60.1.70205). spells: the trap by rank; effects: the aura each rank puts on
--- the enemy; effectDuration: how long the effect lasts by rank (the last one
--- for higher ranks), used when the aura's own times cannot be read; onEnemy:
--- the effect is on the enemy that sprang the trap, so it ends when that enemy
--- dies (the others leave an area on the ground); breaks: damage breaks the
--- effect (the freeze), so it ends with its aura or with damage to the enemy.
+-- the enemy; school: the spell school of the effect (Fire 4, Frost 16), as
+-- UNIT_COMBAT gives it; hurts: the effect deals damage (the fire traps; the
+-- frost ones only freeze or slow).
 Traps.LIST = {
     {
         key = "immolation",
+        school = 4,
+        hurts = true,
         spells = { 13795, 14302, 14303, 14304, 14305 },
         effects = { 13797, 14298, 14299, 14300, 14301 },
-        effectDuration = { 15 },
-        onEnemy = true,
     },
     {
         key = "freezing",
+        school = 16,
         spells = { 1499, 14310, 14311 },
         effects = { 3355, 14308, 14309 },
-        effectDuration = { 10, 15, 20 },
-        onEnemy = true,
-        breaks = true,
     },
     {
         key = "frost",
+        school = 16,
         spells = { 13809 },
         effects = { 13810 },
-        effectDuration = { 30 },
     },
     {
         key = "explosive",
+        school = 4,
+        hurts = true,
         spells = { 13813, 14316, 14317 },
         effects = { 13812, 14314, 14315 },
-        effectDuration = { 20 },
     },
 }
 
@@ -83,14 +104,13 @@ for _, trap in ipairs(Traps.LIST) do
     end
 end
 
--- Traps.armed is the trap that is down, and Traps.effect the one that sprang,
--- while its effect lasts: { trap, rank, spellID, icon, start, duration } or
--- nil. The effect also has the enemy it is on (unit, and its GUID when
--- known), its spellID is nil when the effect was guessed, and guessed is set.
--- Traps.lastArmed is the last trap put down, kept after it is gone.
+-- Traps.armed is the trap that is down: { trap, rank, spellID, icon, start,
+-- duration, warned, test } or nil. Traps.lastArmed is the last trap put down,
+-- kept after it is gone.
 
-local lastOwnCast = -math.huge  -- GetTime() of the hunter's or the pet's last cast that may put an aura
-local enemyCastAt = {}          -- [unit] = GetTime() of that enemy's last cast
+local lastOwnCast = -math.huge    -- GetTime() of the hunter's or the pet's last cast that may put an aura
+local lastGroupCast = -math.huge  -- of the last cast of another group member or their pet
+local enemyCastAt = {}            -- [unit] = GetTime() of that enemy's last cast
 
 -- The trap a spell puts down, and its rank (nil when only the name matched).
 function Traps.Find(spellID)
@@ -105,12 +125,7 @@ function Traps.Find(spellID)
     return name and byName[name], nil
 end
 
-local function EffectDuration(trap, rank)
-    local list = trap.effectDuration
-    return list[math.min(rank or #list, #list)]
-end
-
--- Runs Traps.Update while there is something to count down.
+-- Runs Traps.Update while a trap is down.
 local ticker = CreateFrame("Frame")
 ticker:Hide()
 local sinceUpdate = 0
@@ -123,15 +138,16 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
 end)
 
 local function Changed()
-    ticker:SetShown(Traps.armed ~= nil or Traps.effect ~= nil)
+    ticker:SetShown(Traps.armed ~= nil)
     ns.Display.Refresh()
 end
 
-function Traps.Arm(trap, rank, spellID, duration)
+-- start: when it went down, now unless given (a trap taken back after /reload).
+function Traps.Arm(trap, rank, spellID, duration, start)
     Traps.armed = {
         trap = trap, rank = rank, spellID = spellID,
         icon = Plain(C_Spell.GetSpellTexture(spellID)),
-        start = GetTime(), duration = duration or Traps.ARMED_DURATION,
+        start = start or GetTime(), duration = duration or Traps.ARMED_DURATION,
     }
     Traps.lastArmed = Traps.armed
     ns.Log("armed: %s (spell %d), %d s", trap.key, spellID, Traps.armed.duration)
@@ -145,30 +161,23 @@ function Traps.Test()
     Traps.armed.test = true
 end
 
--- The armed trap sprang on unit: the trap is gone, and its effect starts. aura
--- is the effect's aura when it could be read, nil when the effect was guessed.
-local function Spring(unit, aura, effectID)
+-- /htt clear: drops the countdown, should it ever go wrong (the trap was
+-- taken for sprung too late, or not at all). Returns whether there was one.
+function Traps.Clear()
     local armed = Traps.armed
+    if not armed then
+        return false
+    end
+    ns.Log("cleared: %s", armed.trap.key)
     Traps.armed = nil
-    local now = GetTime()
-    local expires = aura and Plain(aura.expirationTime)
-    local duration = aura and Plain(aura.duration)
-    local start
-    if expires and duration and duration > 0 and expires > now then
-        start = expires - duration
-    else
-        start, duration = now, EffectDuration(armed.trap, armed.rank)
-    end
-    ns.Log("sprang%s: %s on %s (effect %s), %.1f s", aura and "" or " (guessed)", armed.trap.key, unit,
-        tostring(effectID), duration)
-    if ns.db.showEffect then
-        Traps.effect = {
-            trap = armed.trap, rank = armed.rank, spellID = effectID,
-            icon = aura and Plain(aura.icon) or armed.icon,
-            start = start, duration = duration,
-            unit = unit, guid = Plain(UnitGUID(unit)), guessed = aura == nil,
-        }
-    end
+    Changed()
+    return true
+end
+
+-- The armed trap sprang on unit (how it was told: why), so it is gone.
+local function Sprang(unit, why)
+    ns.Log("sprang (%s): %s on %s", why, Traps.armed.trap.key, unit)
+    Traps.armed = nil
     Changed()
 end
 
@@ -177,27 +186,20 @@ local function IsWatched(unit)
     return unit == "target" or unit == "focus" or unit == "mouseover" or unit:find("^nameplate%d") ~= nil
 end
 
--- The aura of spellID on unit; ok is false when the query failed.
-local function GetAura(unit, spellID)
-    local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, spellID)
-    if not ok then
-        return false
-    end
-    return true, aura
-end
-
 -- The aura of one of the trap's effects on unit, if it can be read, the
 -- hunter put it there, and not before the trap went down.
 local function FindEffect(unit, trap, since)
     for _, effectID in ipairs(trap.effects) do
-        local _, aura = GetAura(unit, effectID)
-        aura = Plain(aura)
+        local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, effectID)
+        aura = ok and Plain(aura)
         if aura then
-            local mine = Plain(aura.isFromPlayerOrPlayerPet) == true or Plain(aura.sourceUnit) == "player"
+            -- isFromPlayerOrPlayerPet is true for any player's aura, a group
+            -- member's too (/htt probe, 2026-10-04), so only the source tells.
+            local mine = Plain(aura.sourceUnit) == "player"
             local expires, duration = Plain(aura.expirationTime), Plain(aura.duration)
             local applied = expires and duration and duration > 0 and expires - duration
             if mine and not (applied and applied < since - LEEWAY) then
-                return aura, effectID
+                return effectID
             end
         end
     end
@@ -222,142 +224,132 @@ local function AddsHiddenAuras(info)
 end
 
 -- An aura that cannot be read turned up on unit while the trap is down. It is
--- taken for the trap's effect unless something else explains it: a cast of
--- the hunter's or the pet's just before (their shots put auras too), or one
--- of the enemy's own. In a group, other players' auras would be taken for it,
--- so this is only done alone.
-local function MayGuess(unit)
+-- taken for the trap's unless something else explains it: a cast just before
+-- of the hunter's, the pet's or the group's (their spells put auras too), or
+-- one of the enemy's own. Returns what explains it, or nil.
+local function Explained(unit)
     local now = GetTime()
-    return not IsInGroup() and now - lastOwnCast > OWN_CAST_WINDOW
-        and now - (enemyCastAt[unit] or -math.huge) > ENEMY_CAST_WINDOW
-        and Plain(UnitCanAttack("player", unit)) ~= false
-end
-
--- Whether an aura of this spell would be secret now, so that not finding it
--- says nothing.
-local function AuraSecret(spellID)
-    if not (C_Secrets and C_Secrets.ShouldSpellAuraBeSecret) then
-        return false
-    end
-    local ok, secret = pcall(C_Secrets.ShouldSpellAuraBeSecret, spellID)
-    return not ok or Plain(secret) ~= false
-end
-
--- Whether unit is the enemy the effect is on: the same GUID, or the same unit
--- when the GUID could not be read.
-local function IsEffectUnit(effect, unit)
-    if effect.guid then
-        return Plain(UnitGUID(unit)) == effect.guid
-    end
-    return unit == effect.unit
-end
-
-local function EndEffect(why, unit)
-    ns.Log("effect ended (%s): %s on %s", why, Traps.effect.trap.key, unit)
-    Traps.effect = nil
-    Changed()
-end
-
--- A freeze ends early when damage breaks it, so when its aura is gone.
-local function CheckEffect(unit)
-    local effect = Traps.effect
-    if not (effect and effect.trap.breaks and effect.spellID and IsEffectUnit(effect, unit))
-        or AuraSecret(effect.spellID) then
-        return
-    end
-    local ok, aura = GetAura(unit, effect.spellID)
-    if ok and not ns.IsSecret(aura) and aura == nil then
-        EndEffect("aura gone", unit)
+    if now - lastOwnCast <= CAST_WINDOW then
+        return "your or your pet's cast"
+    elseif now - lastGroupCast <= CAST_WINDOW then
+        return "a group member's cast"
+    elseif now - (enemyCastAt[unit] or -math.huge) <= ENEMY_CAST_WINDOW then
+        return "its own cast"
+    elseif Plain(UnitCanAttack("player", unit)) == false then
+        return "not an enemy"
     end
 end
 
 function Traps.OnAura(unit, info)
+    local armed = Traps.armed
     unit = Plain(unit)
-    if not (Traps.armed or Traps.effect) or type(unit) ~= "string" or not IsWatched(unit) then
+    if not armed or armed.test or type(unit) ~= "string" or not IsWatched(unit) then
         return
     end
+    local effectID = FindEffect(unit, armed.trap, armed.start)
+    if effectID then
+        Sprang(unit, "its effect " .. effectID)
+    elseif AddsHiddenAuras(info) then
+        local reason = Explained(unit)
+        if reason then
+            ns.Log("aura on %s not the trap's: %s", unit, reason)
+        else
+            Sprang(unit, "guessed from an aura")
+        end
+    end
+end
+
+-- Whether fire or frost on unit may be the trap's. The hunter and the pet
+-- have none but the traps, so only a spell of the group's just before
+-- explains it.
+local function MayBeTrap(unit)
+    return GetTime() - lastGroupCast > CAST_WINDOW and Plain(UnitCanAttack("player", unit)) ~= false
+end
+
+-- UNIT_COMBAT (never secret): what an enemy took, and of which spell school.
+-- Fire or frost on an enemy while a trap of that school is down comes from
+-- the trap (MayBeTrap): fire damage means a fire trap sprang, and a full
+-- resist or an immunity that the trap sprang for nothing (Blizzard's
+-- CombatFeedback reads a resist as a WOUND of 0 with the RESIST flag).
+function Traps.OnCombat(unit, action, flags, amount, school)
     local armed = Traps.armed
-    if armed and not armed.test then
-        local aura, effectID = FindEffect(unit, armed.trap, armed.start)
-        if aura then
-            Spring(unit, aura, effectID)
-            return
-        elseif AddsHiddenAuras(info) and MayGuess(unit) then
-            Spring(unit, nil, nil)
-            return
-        end
-    end
-    CheckEffect(unit)
-end
-
--- The unit the effect's enemy is now known as: its own, else the target,
--- focus, mouseover or a nameplate with its GUID. Nil when it is none of them.
-local OTHER_UNITS = { "target", "focus", "mouseover" }
-local function FindEffectUnit(effect)
-    if not effect.guid or IsEffectUnit(effect, effect.unit) then
-        return effect.unit
-    end
-    for _, unit in ipairs(OTHER_UNITS) do
-        if IsEffectUnit(effect, unit) then
-            return unit
-        end
-    end
-    for index = 1, 40 do
-        local unit = "nameplate" .. index
-        if IsEffectUnit(effect, unit) then
-            return unit
-        end
-    end
-end
-
--- An effect on one enemy ends when the enemy dies (UnitIsDead is never
--- secret). It is checked on every tick, and when the enemy's nameplate goes,
--- which happens on death but also out of range.
-local function CheckDeath(unit)
-    local effect = Traps.effect
-    if effect and effect.trap.onEnemy and Plain(UnitIsDead(unit)) then
-        EndEffect("died", unit)
-    end
-end
-
-function Traps.OnPlateRemoved(unit)
-    local effect = Traps.effect
     unit = Plain(unit)
-    if effect and type(unit) == "string" and IsEffectUnit(effect, unit) then
-        CheckDeath(unit)
+    if not armed or armed.test or type(unit) ~= "string" or not IsWatched(unit) then
+        return
+    end
+    action, flags, amount, school = Plain(action), Plain(flags), Plain(amount), Plain(school)
+    if school ~= armed.trap.school or not MayBeTrap(unit) then
+        return
+    elseif action == "IMMUNE" then
+        Sprang(unit, "immune")
+    elseif action == "WOUND" and flags == "RESIST" and amount == 0 then
+        Sprang(unit, "resisted")
+    elseif action == "WOUND" and armed.trap.hurts and type(amount) == "number" and amount > 0 then
+        Sprang(unit, "fire damage")
     end
 end
 
--- Damage (never secret) to the frozen enemy breaks the freeze.
-function Traps.OnDamage(unit, action)
-    local effect = Traps.effect
-    unit = Plain(unit)
-    if effect and effect.trap.breaks and type(unit) == "string" and Plain(action) == "WOUND"
-        and IsEffectUnit(effect, unit) then
-        EndEffect("damage", unit)
+local function IsGroupUnit(unit)
+    return unit:find("^party%d") ~= nil or unit:find("^partypet%d") ~= nil
+        or unit:find("^raid%d") ~= nil or unit:find("^raidpet%d") ~= nil
+end
+Traps.IsGroupUnit = IsGroupUnit
+
+-- Whether a group unit is the hunter or the pet, as in a raid they are raid
+-- units too. By GUID when the comparison is secret.
+local function IsSelf(unit)
+    for _, own in ipairs({ "player", "pet" }) do
+        local same = Plain(UnitIsUnit(unit, own))
+        if same == nil then
+            local guid = Plain(UnitGUID(unit))
+            same = guid ~= nil and guid == Plain(UnitGUID(own))
+        end
+        if same then
+            return true
+        end
     end
+    return false
 end
 
+-- Whether a spell puts no aura on an enemy (NO_AURA_SPELLS). A secret spell
+-- may.
+local function PutsNoAura(spellID)
+    if not spellID then
+        return false
+    elseif noAura[spellID] then
+        return true
+    end
+    local name = Plain(C_Spell.GetSpellName(spellID))
+    return name ~= nil and noAuraNames[name] == true
+end
+
+-- Group members' spells are secret in combat, but that they cast is not.
 function Traps.OnSpellCast(unit, spellID)
     unit, spellID = Plain(unit), Plain(spellID)
     if unit == "player" or unit == "pet" then
         local trap, rank = Traps.Find(spellID)
         if trap and unit == "player" then
             Traps.Arm(trap, rank, spellID)
-        elseif not (spellID and NO_AURA[spellID]) then
+        elseif not PutsNoAura(spellID) then
             lastOwnCast = GetTime()
         end
-    elseif type(unit) == "string" and IsWatched(unit) then
-        enemyCastAt[unit] = GetTime()
+    elseif type(unit) ~= "string" then
+        return
+    elseif IsWatched(unit) then
+        -- A group member as the target also casts under their own group unit.
+        if Plain(UnitCanAttack("player", unit)) ~= false then
+            enemyCastAt[unit] = GetTime()
+        end
+    elseif IsGroupUnit(unit) and not IsSelf(unit) and not PutsNoAura(spellID) then
+        lastGroupCast = GetTime()
     end
 end
 
--- Ends what has run out and starts the warning.
+-- Ends a trap that has run out and starts the warning.
 function Traps.Update()
-    local now = GetTime()
-    local armed, effect = Traps.armed, Traps.effect
+    local armed = Traps.armed
     if armed then
-        local left = armed.start + armed.duration - now
+        local left = armed.start + armed.duration - GetTime()
         if left <= 0 then
             ns.Log("ran out: %s", armed.trap.key)
             Traps.armed = nil
@@ -366,16 +358,45 @@ function Traps.Update()
             ns.Display.Warn()
         end
     end
-    if effect and now >= effect.start + effect.duration then
-        Traps.effect = nil
-    elseif effect and effect.trap.onEnemy then
-        local unit = FindEffectUnit(effect)
-        if unit then
-            effect.unit = unit
-            CheckDeath(unit)
+    Changed()
+end
+
+-- /reload ---------------------------------------------------------------------
+
+-- The trap stays in the world through a /reload, and GetTime() goes on, so the
+-- armed trap is saved on the way out (PLAYER_LOGOUT) and taken back when the
+-- interface comes back (PLAYER_ENTERING_WORLD with isReloadingUi). On a real
+-- logout the trap goes with the character, so a login never takes it back.
+function Traps.Save()
+    local armed = Traps.armed
+    if armed and not armed.test then
+        ns.db.armed = {
+            key = armed.trap.key, rank = armed.rank, spellID = armed.spellID,
+            start = armed.start, duration = armed.duration, warned = armed.warned,
+        }
+    else
+        ns.db.armed = nil
+    end
+end
+
+function Traps.Restore(isReloadingUi)
+    local saved = ns.db.armed
+    ns.db.armed = nil
+    if not isReloadingUi or type(saved) ~= "table" then
+        return
+    end
+    local trap
+    for _, candidate in ipairs(Traps.LIST) do
+        if candidate.key == saved.key then
+            trap = candidate
         end
     end
-    Changed()
+    local now = GetTime()
+    if trap and type(saved.spellID) == "number" and type(saved.start) == "number"
+        and type(saved.duration) == "number" and saved.start <= now and now < saved.start + saved.duration then
+        Traps.Arm(trap, type(saved.rank) == "number" and saved.rank or nil, saved.spellID, saved.duration, saved.start)
+        Traps.armed.warned = saved.warned == true
+    end
 end
 
 function Traps.Init()
@@ -388,18 +409,28 @@ function Traps.Init()
             byName[name] = trap
         end
     end
+    for _, spellID in ipairs(NO_AURA_SPELLS) do
+        local name = Plain(C_Spell.GetSpellName(spellID))
+        if name then
+            noAuraNames[name] = true
+        end
+    end
 
     local events = CreateFrame("Frame")
-    ns.RegisterEvents(events, "UNIT_SPELLCAST_SUCCEEDED", "UNIT_AURA", "UNIT_COMBAT", "NAME_PLATE_UNIT_REMOVED")
-    events:SetScript("OnEvent", function(_, event, unit, arg2, arg3)
+    ns.RegisterEvents(events, "UNIT_SPELLCAST_SUCCEEDED", "UNIT_AURA", "UNIT_COMBAT", "PLAYER_ENTERING_WORLD",
+        "PLAYER_LOGOUT")
+    events:SetScript("OnEvent", function(_, event, unit, arg2, arg3, arg4, arg5)
         if event == "UNIT_SPELLCAST_SUCCEEDED" then
             Traps.OnSpellCast(unit, arg3)
         elseif event == "UNIT_AURA" then
             Traps.OnAura(unit, arg2)
         elseif event == "UNIT_COMBAT" then
-            Traps.OnDamage(unit, arg2)
+            Traps.OnCombat(unit, arg2, arg3, arg4, arg5)
+        elseif event == "PLAYER_ENTERING_WORLD" then
+            -- unit is isInitialLogin, arg2 isReloadingUi.
+            Traps.Restore(arg2)
         else
-            Traps.OnPlateRemoved(unit)
+            Traps.Save()
         end
     end)
 end

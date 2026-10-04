@@ -12,6 +12,9 @@ L["settings reset to the defaults."] = "настройки сброшены на
 L["/htt - open the options"] = "/htt - открыть настройки"
 L["/htt unlock, /htt lock - move the icon"] = "/htt unlock, /htt lock - переместить значок"
 L["/htt test - show a test trap"] = "/htt test - показать тестовую ловушку"
+L["/htt clear - clear the countdown, should it go wrong"] = "/htt clear - сбросить отсчет, если он сбился"
+L["countdown cleared."] = "отсчет сброшен."
+L["there is no countdown to clear."] = "нет отсчета, который можно сбросить."
 L["/htt reset - restore the default settings"] = "/htt reset - восстановить настройки по умолчанию"
 L["open the game menu, then Options > AddOns > Hunter Trap Timer."] = "откройте главное меню, затем Параметры > Модификации > Hunter Trap Timer."
 
@@ -19,13 +22,11 @@ L["open the game menu, then Options > AddOns > Hunter Trap Timer."] = "откр�
 L["Drag to move, then /htt lock"] = "Перетащите, затем /htt lock"
 
 -- Options
-L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains. In a group other players' auras could be taken for it, so there the countdown runs to its end."] = "Показывает, сколько еще ваша ловушка останется взведенной: 60 секунд, если на нее никто не наступит. WoW Forever скрывает от модификаций журнал боя, а в бою и ауры противников, поэтому сработавшая ловушка распознается по новой ауре на противнике, которую больше ничто не объясняет. В группе за нее можно принять ауры других игроков, поэтому там отсчет идет до конца."
+L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains, such as a spell of yours, your pet's or your group's. In a group, an effect that comes without a spell, such as a poison, can now and then be taken for it."] = "Показывает, сколько еще ваша ловушка останется взведенной: 60 секунд, если на нее никто не наступит. WoW Forever скрывает от модификаций журнал боя, а в бою и ауры противников, поэтому сработавшая ловушка распознается по новой ауре на противнике, которую больше ничто не объясняет, например заклинание ваше, вашего питомца или вашей группы. В группе за нее иногда можно принять эффект, наложенный без заклинания, например яд."
 L["Icon"] = "Значок"
 L["Lock the icon"] = "Закрепить значок"
 L["Unlocked, the icon stays on screen and can be dragged with the mouse."] = "Открепленный значок остается на экране, и его можно перетаскивать мышью."
 L["Icon size"] = "Размер значка"
-L["Count down the effect once the trap springs"] = "Отсчитывать эффект после срабатывания ловушки"
-L["The icon turns green and counts down the effect on the enemy, such as the freeze of %s. It ends early if the enemy dies, and a freeze also if the enemy takes damage."] = "Значок становится зеленым и отсчитывает эффект на противнике, например заморозку от «%s». Он заканчивается раньше, если противник умирает, а заморозка — еще и если противник получает урон."
 L["Test"] = "Тест"
 L["Shows a trap that runs out in 15 seconds."] = "Показывает ловушку, которая исчезнет через 15 секунд."
 L["Reset position"] = "Сбросить положение"

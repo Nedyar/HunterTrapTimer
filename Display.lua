@@ -1,39 +1,34 @@
--- Display.lua: the trap's icon, with a clock sweep and the seconds left.
+-- Display.lua: the armed trap's icon, with a clock sweep and the seconds left.
 --
--- The armed trap's icon comes first. When the trap springs, its icon turns
--- green and counts down the effect; a trap put down meanwhile shows beside it.
--- The seconds turn red, and the icon flashes, while the warning is on.
+-- The seconds turn red, and the icon flashes, while the warning is on. The
+-- icon goes when the trap runs out or springs.
 local _, ns = ...
 local L = ns.L
 
 local Display = {}
 ns.Display = Display
 
-local GAP = 6
 local PLACEHOLDER_ICON = "Interface\\Icons\\Spell_Frost_ChainsOfIce"
-local COLORS = {
-    armed = { 1, 1, 1 },
-    warning = { 1, 0.25, 0.25 },
-    effect = { 0.3, 1, 0.3 },
-}
+local WHITE = { 1, 1, 1 }
+local RED = { 1, 0.25, 0.25 }
 
-local anchor  -- the frame the icons hang from, dragged while unlocked
+local anchor  -- the frame the icon hangs from, dragged while unlocked
 local mover   -- the green cover and hint shown while unlocked
-local icons = {}
+local icon
 
-local function Layout(icon, index)
+local function Layout()
     local size = ns.db.iconSize
     icon:SetSize(size, size)
-    icon:ClearAllPoints()
-    icon:SetPoint("TOPLEFT", anchor, "TOPLEFT", (index - 1) * (size + GAP), 0)
     icon.text:SetFont(STANDARD_TEXT_FONT, math.floor(size * 0.42 + 0.5), "THICKOUTLINE")
 end
 
-local function CreateIcon(index)
-    local icon = CreateFrame("Frame", nil, anchor)
+local function CreateIcon()
+    icon = CreateFrame("Frame", nil, anchor)
+    icon:SetAllPoints()
     icon.border = icon:CreateTexture(nil, "BACKGROUND")
     icon.border:SetPoint("TOPLEFT", -2, 2)
     icon.border:SetPoint("BOTTOMRIGHT", 2, -2)
+    icon.border:SetColorTexture(0, 0, 0, 1)
     icon.texture = icon:CreateTexture(nil, "ARTWORK")
     icon.texture:SetAllPoints()
     icon.texture:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -59,13 +54,10 @@ local function CreateIcon(index)
     fade:SetFromAlpha(1)
     fade:SetToAlpha(0.3)
     fade:SetDuration(0.35)
-
-    Layout(icon, index)
-    icons[index] = icon
-    return icon
+    Layout()
 end
 
-local function SetFlashing(icon, flashing)
+local function SetFlashing(flashing)
     if flashing and not icon.flash:IsPlaying() then
         icon.flash:Play()
     elseif not flashing and icon.flash:IsPlaying() then
@@ -73,67 +65,49 @@ local function SetFlashing(icon, flashing)
     end
 end
 
-local function SetColor(icon, color)
+local function SetColor(color)
     icon.text:SetTextColor(color[1], color[2], color[3])
-    if color == COLORS.effect then
-        icon.border:SetColorTexture(color[1], color[2], color[3], 1)
-    else
-        icon.border:SetColorTexture(0, 0, 0, 1)
-    end
 end
 
--- entry: Traps.armed or Traps.effect.
-local function ShowEntry(icon, entry, now, isEffect)
-    if icon.entry ~= entry then
-        icon.entry = entry
-        icon.texture:SetTexture(entry.icon or PLACEHOLDER_ICON)
-        icon.cooldown:SetCooldown(entry.start, entry.duration)
+-- armed: Traps.armed.
+local function ShowTrap(armed)
+    if icon.entry ~= armed then
+        icon.entry = armed
+        icon.texture:SetTexture(armed.icon or PLACEHOLDER_ICON)
+        icon.cooldown:SetCooldown(armed.start, armed.duration)
     end
-    local left = math.max(0, entry.start + entry.duration - now)
+    local left = math.max(0, armed.start + armed.duration - GetTime())
+    local warning = ns.db.warnSeconds > 0 and left <= ns.db.warnSeconds
     icon.text:SetText(math.ceil(left))
-    local warning = not isEffect and ns.db.warnSeconds > 0 and left <= ns.db.warnSeconds
-    SetColor(icon, isEffect and COLORS.effect or warning and COLORS.warning or COLORS.armed)
-    SetFlashing(icon, warning and ns.db.warnFlash)
-    icon:Show()
+    SetColor(warning and RED or WHITE)
+    SetFlashing(warning and ns.db.warnFlash)
 end
 
--- While unlocked with no trap down, an icon shows where they will be.
-local function ShowPlaceholder(icon)
+-- While unlocked with no trap down, the icon shows where it will be.
+local function ShowPlaceholder()
     icon.entry = nil
     icon.texture:SetTexture(PLACEHOLDER_ICON)
     icon.cooldown:Clear()
     icon.text:SetText(ns.Traps.ARMED_DURATION)
-    SetColor(icon, COLORS.armed)
-    SetFlashing(icon, false)
-    icon:Show()
+    SetColor(WHITE)
+    SetFlashing(false)
 end
 
 function Display.Refresh()
     if not anchor then
         return
     end
-    local now, used = GetTime(), 0
-    local armed, effect = ns.Traps.armed, ns.Traps.effect
+    local armed = ns.Traps.armed
     if armed then
-        used = used + 1
-        ShowEntry(icons[used] or CreateIcon(used), armed, now, false)
-    end
-    if effect then
-        used = used + 1
-        ShowEntry(icons[used] or CreateIcon(used), effect, now, true)
-    end
-    if used == 0 and not ns.db.locked then
-        used = 1
-        ShowPlaceholder(icons[1] or CreateIcon(1))
-    end
-    for index = used + 1, #icons do
-        local icon = icons[index]
+        ShowTrap(armed)
+    elseif not ns.db.locked then
+        ShowPlaceholder()
+    else
         icon.entry = nil
-        SetFlashing(icon, false)
-        icon:Hide()
+        SetFlashing(false)
     end
     mover:SetShown(not ns.db.locked)
-    anchor:SetShown(used > 0)
+    anchor:SetShown(armed ~= nil or not ns.db.locked)
 end
 
 -- The warning starts: the flash is drawn by Refresh, the sound plays once.
@@ -160,9 +134,7 @@ function Display.ApplySettings()
     anchor:SetPoint("CENTER", UIParent, "CENTER", db.x, db.y)
     anchor:SetSize(db.iconSize, db.iconSize)
     anchor:EnableMouse(not db.locked)
-    for index, icon in ipairs(icons) do
-        Layout(icon, index)
-    end
+    Layout()
     Display.Refresh()
 end
 
@@ -180,6 +152,7 @@ function Display.Init()
         self:StopMovingOrSizing()
         SavePosition()
     end)
+    CreateIcon()
 
     mover = CreateFrame("Frame", nil, anchor)
     mover:SetAllPoints()

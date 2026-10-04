@@ -50,7 +50,6 @@ ns.DEFAULTS = {
     y = -150,
     locked = true,       -- unlocked, the icon shows and can be dragged
     iconSize = 48,
-    showEffect = true,   -- once the trap springs, the icon counts down its effect
     warnSeconds = 10,    -- the warning starts with this many seconds left (0: no warning)
     warnFlash = true,    -- the icon flashes during the warning
     warnSound = true,    -- a sound when the warning starts
@@ -93,6 +92,8 @@ function ns.Sanitize(db)
             db[key] = default
         end
     end
+    -- The effect's countdown, and its setting, are gone.
+    db.showEffect = nil
     db.version = ns.DEFAULTS.version
 end
 
@@ -155,6 +156,12 @@ SlashCmdList.HUNTERTRAPTIMER = function(message)
         ns.Print(L["icon locked."])
     elseif command == "test" then
         ns.Traps.Test()
+    elseif command == "clear" then
+        if ns.Traps.Clear() then
+            ns.Print(L["countdown cleared."])
+        else
+            ns.Print(L["there is no countdown to clear."])
+        end
     elseif command == "probe" then
         -- A diagnostic for what WoW Forever lets the addon see; see Probe.lua.
         ns.Probe.Command(rest:lower())
@@ -165,6 +172,7 @@ SlashCmdList.HUNTERTRAPTIMER = function(message)
         ns.Print(L["/htt - open the options"])
         ns.Print(L["/htt unlock, /htt lock - move the icon"])
         ns.Print(L["/htt test - show a test trap"])
+        ns.Print(L["/htt clear - clear the countdown, should it go wrong"])
         ns.Print(L["/htt reset - restore the default settings"])
     end
 end

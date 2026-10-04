@@ -7,7 +7,7 @@
 -- can be copied. The log is recorded on demand: /htt probe log starts it, and
 -- run again stops it and shows the report. While recording, it logs the
 -- hunter's casts, and what happens to enemies from the moment a trap goes
--- down until a while after it and its effect are gone. When not recording it
+-- down until a while after it is gone. When not recording it
 -- listens to no event at all. /htt probe clear empties the log.
 local _, ns = ...
 local Plain = ns.Plain
@@ -16,7 +16,7 @@ local Probe = {}
 ns.Probe = Probe
 
 local MAX_LINES = 400
-local AFTER = 20          -- seconds the log goes on after the trap and its effect are gone
+local AFTER = 20          -- seconds the log goes on after the trap is gone
 local MAX_AURAS = 40
 
 local log = {}
@@ -74,10 +74,10 @@ local function Record(text)
     end
 end
 
--- Whether to log what happens to enemies: while a trap or its effect is up,
+-- Whether to log what happens to enemies: while a trap is down,
 -- and for a while after.
 local function Active()
-    if ns.Traps.armed or ns.Traps.effect then
+    if ns.Traps.armed then
         activeUntil = GetTime() + AFTER
         return true
     end
@@ -101,7 +101,7 @@ end
 
 local function AuraText(aura)
     local expires = Plain(aura.expirationTime)
-    return ("from %s, mine %s, duration %s, %s s left"):format(Show(aura.sourceUnit), Show(aura.isFromPlayerOrPlayerPet),
+    return ("from %s, by a player %s, duration %s, %s s left"):format(Show(aura.sourceUnit), Show(aura.isFromPlayerOrPlayerPet),
         Show(aura.duration), expires and ("%.1f"):format(expires - GetTime()) or Show(aura.expirationTime))
 end
 
@@ -253,8 +253,8 @@ local function EntryText(entry)
     if not entry then
         return "none"
     end
-    return ("%s (spell %s%s), %.1f s left"):format(entry.trap.key, tostring(entry.spellID),
-        entry.guessed and ", guessed" or "", entry.start + entry.duration - GetTime())
+    return ("%s (spell %s), %.1f s left"):format(entry.trap.key, tostring(entry.spellID),
+        entry.start + entry.duration - GetTime())
 end
 
 local function ReportText()
@@ -268,7 +268,7 @@ local function ReportText()
     Add("In combat: %s. In a group: %s. Secret restrictions: %s; auras secret: %s; cooldowns secret: %s. Combat log restricted: %s.",
         Ask(InCombatLockdown), Ask(IsInGroup), Ask(S.HasSecretRestrictions), Ask(S.ShouldAurasBeSecret), Ask(S.ShouldCooldownsBeSecret),
         Ask(C_CombatLog and C_CombatLog.IsCombatLogRestricted))
-    Add("Armed: %s. Effect: %s.", EntryText(ns.Traps.armed), EntryText(ns.Traps.effect))
+    Add("Armed: %s.", EntryText(ns.Traps.armed))
     Add("")
 
     Add("Trap spells you know (cast secrecy, cooldown secrecy, cooldown secret now; cooldown), then their effects (aura secrecy, aura secret now; on the target):")
@@ -373,6 +373,18 @@ end
 
 events:SetScript("OnEvent", OnEvent)
 
+-- The casts of everyone else, on a frame of their own: the group's (which
+-- explain auras on enemies, see Traps.lua) and the enemies', around a trap.
+local otherCasts = CreateFrame("Frame")
+otherCasts:SetScript("OnEvent", function(_, _, unit, _, spellID)
+    unit = Plain(unit)
+    if type(unit) ~= "string" or unit == "player" or unit == "pet" or not Active() then
+        return
+    elseif ns.Traps.IsGroupUnit(unit) or IsWatched(unit) then
+        Record(("UNIT_SPELLCAST_SUCCEEDED %s: %s"):format(UnitLabel(unit), SpellLabel(spellID)))
+    end
+end)
+
 local function LogNote(text, ...)
     Record("addon: " .. text:format(...))
 end
@@ -384,6 +396,7 @@ local function StartRecording()
         "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED")
     ns.RegisterEvents(events, "UNIT_AURA", "UNIT_COMBAT", "SPELL_UPDATE_COOLDOWN", "PLAYER_TOTEM_UPDATE",
         "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "NAME_PLATE_UNIT_REMOVED")
+    ns.RegisterEvents(otherCasts, "UNIT_SPELLCAST_SUCCEEDED")
     Record("recording started")
 end
 
@@ -392,6 +405,7 @@ local function StopRecording()
     recording = false
     ns.Log = NoLog
     events:UnregisterAllEvents()
+    otherCasts:UnregisterAllEvents()
 end
 
 function Probe.Command(option)

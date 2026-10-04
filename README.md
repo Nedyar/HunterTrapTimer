@@ -11,11 +11,10 @@ how long your hunter trap stays armed before it vanishes.
   it. Only one trap can be down at a time, so a new one replaces the old.
 - **Warning before it runs out.** With 10 seconds left (adjustable, or off)
   the seconds turn red, the icon flashes and a sound plays.
-- **Notices when the trap springs.** The icon then turns green and counts
-  down the effect on the enemy, such as the freeze. A freeze ends early when
-  the enemy takes damage, and the freeze and Immolation Trap's burn when the
-  enemy dies. Frost and Explosive Trap leave an area on the ground, which
-  lasts its full time.
+- **Notices when the trap springs.** A trap that springs is gone, so its
+  icon goes, also when the enemy resists the trap or is immune to it.
+- **Keeps the countdown through a `/reload`.** The trap stays in the world
+  when you reload the interface, and so does its countdown.
 - **Every client language.** The texts are in English, German, Spanish (EU
   and Latin America), French, Italian, Korean, Portuguese (Brazil, also used
   by Portugal's client), Russian and Chinese (simplified and traditional).
@@ -39,6 +38,7 @@ saves them in `HunterTrapTimerDB`.
 | `/htt` | Open the options |
 | `/htt unlock`, `/htt lock` | Show the icon to drag it, and lock it again |
 | `/htt test` | Show a test trap that runs out in 15 seconds |
+| `/htt clear` | Clear the countdown, should it ever go wrong |
 | `/htt reset` | Restore the default settings |
 | `/htt probe` | A report on what the client lets the addon see, in a window you can copy (`/htt probe log` records the trap's events until you run it again) |
 
@@ -49,22 +49,27 @@ saves them in `HunterTrapTimerDB`.
 WoW Forever runs the Midnight addon API. Addons cannot read the combat log
 at all, and in combat the auras on enemies are secret. A trap that springs
 puts you in combat at that very moment, so its effect can seldom be read
-(when it can, the addon uses it). Three things do come through:
+(when it can, the addon uses it). These do come through:
 
-- **Your own casts.** Putting a trap down is always seen, so the 60 second
-  countdown is exact.
+- **Casts.** Putting a trap down is always seen, so the 60 second countdown
+  is exact. Your group's spells are secret in combat, but that they cast is
+  not.
 - **That an enemy gained an aura**, though not which one. With a trap down,
-  an aura that nothing else explains is taken for the trap's effect:
-  something else explains it when you or your pet cast a spell in the
-  1.5 seconds before (Auto Shot excepted, as it puts no aura), or the enemy
-  itself cast one in the second before.
-  In a group, other players' auras could be taken for the trap, so there
-  the addon does not guess and the countdown runs to its end.
-- **Damage and death.** Damage to the frozen enemy and an enemy's death are
-  never secret, so they end the effect's countdown.
+  an aura that nothing else explains is taken for the trap's:
+  something else explains it when you, your pet, or anyone in your group or
+  their pets cast a spell in the 1.5 seconds before (attacks that put no
+  aura excepted, such as Auto Shot, Raptor Strike, Arcane Shot or the pet's
+  Bite), or the enemy itself cast one in the second before. In a
+  group, an effect that comes with no spell, such as a rogue's poison, a
+  weapon's proc or a totem's attack, can now and then be taken for the trap.
+- **Damage, with its spell school.** It is never secret. Hunters and their
+  pets cast no fire or frost spell besides traps, so fire or frost on an
+  enemy while a trap of that school is down is the trap's, unless someone in
+  your group cast a spell just before: fire damage means a fire trap sprang,
+  and a full resist or an immunity that the trap sprang for nothing.
 
-When the effect cannot be read, its countdown is the full time of the
-trap's rank.
+The trap's effect itself (the freeze, the burn) is not shown: the addon only
+times the armed trap.
 
 ## Files
 
@@ -95,9 +100,9 @@ lua5.1 Tests\run.lua [path to HunterTrapTimer]
 
 The path defaults to the folder that holds `Tests`. The tests put traps
 down and let them run out or spring, with auras that can be read, secret
-ones, and ones that a cast explains; they cover the warning, the effect's
-countdown and how it ends, moving the icon, the options, the saved
-settings, the probe, and every client language, which must translate
+ones, and ones that a cast explains, and with resists and immune enemies;
+they cover the warning, a `/reload` and a new login, moving the icon, the
+options, the saved settings, the probe, and every client language, which must translate
 exactly the texts the code uses, with the same placeholders. They also fail
 if the addon sets a global other than its saved settings and slash commands.
 

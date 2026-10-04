@@ -12,6 +12,9 @@ L["settings reset to the defaults."] = "설정을 기본값으로 초기화했�
 L["/htt - open the options"] = "/htt - 설정 열기"
 L["/htt unlock, /htt lock - move the icon"] = "/htt unlock, /htt lock - 아이콘 옮기기"
 L["/htt test - show a test trap"] = "/htt test - 테스트용 덫 표시"
+L["/htt clear - clear the countdown, should it go wrong"] = "/htt clear - 카운트다운이 잘못되면 지우기"
+L["countdown cleared."] = "카운트다운을 지웠습니다."
+L["there is no countdown to clear."] = "지울 카운트다운이 없습니다."
 L["/htt reset - restore the default settings"] = "/htt reset - 기본 설정으로 되돌리기"
 L["open the game menu, then Options > AddOns > Hunter Trap Timer."] = "게임 메뉴를 연 다음 설정 > 애드온 > Hunter Trap Timer로 이동하세요."
 
@@ -19,13 +22,11 @@ L["open the game menu, then Options > AddOns > Hunter Trap Timer."] = "게임 �
 L["Drag to move, then /htt lock"] = "끌어서 옮긴 다음 /htt lock"
 
 -- Options
-L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains. In a group other players' auras could be taken for it, so there the countdown runs to its end."] = "덫이 설치된 채로 얼마나 남는지 표시합니다. 무언가 밟지 않는 한 60초입니다. WoW Forever는 애드온에 전투 기록을 숨기고 전투 중에는 적의 효과도 숨기므로, 발동한 덫은 다른 이유로 설명되지 않는 적의 새 효과로 알아냅니다. 파티에서는 다른 플레이어의 효과를 덫으로 착각할 수 있어 카운트다운이 끝까지 진행됩니다."
+L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains, such as a spell of yours, your pet's or your group's. In a group, an effect that comes without a spell, such as a poison, can now and then be taken for it."] = "덫이 설치된 채로 얼마나 남는지 표시합니다. 무언가 밟지 않는 한 60초입니다. WoW Forever는 애드온에 전투 기록을 숨기고 전투 중에는 적의 효과도 숨기므로, 발동한 덫은 내 주문, 소환수나 파티의 주문 등 다른 이유로 설명되지 않는 적의 새 효과로 알아냅니다. 파티에서는 독처럼 주문 없이 걸리는 효과를 가끔 덫으로 착각할 수 있습니다."
 L["Icon"] = "아이콘"
 L["Lock the icon"] = "아이콘 잠금"
 L["Unlocked, the icon stays on screen and can be dragged with the mouse."] = "잠금을 해제하면 아이콘이 화면에 계속 표시되고 마우스로 끌어서 옮길 수 있습니다."
 L["Icon size"] = "아이콘 크기"
-L["Count down the effect once the trap springs"] = "덫이 발동하면 효과 시간 표시"
-L["The icon turns green and counts down the effect on the enemy, such as the freeze of %s. It ends early if the enemy dies, and a freeze also if the enemy takes damage."] = "아이콘이 녹색으로 바뀌고 적에게 걸린 효과(예: %s의 빙결)의 남은 시간을 표시합니다. 적이 죽으면 일찍 끝나며, 빙결은 적이 피해를 입어도 끝납니다."
 L["Test"] = "테스트"
 L["Shows a trap that runs out in 15 seconds."] = "15초 후에 사라지는 덫을 표시합니다."
 L["Reset position"] = "위치 초기화"

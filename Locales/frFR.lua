@@ -12,6 +12,9 @@ L["settings reset to the defaults."] = "paramètres réinitialisés aux valeurs 
 L["/htt - open the options"] = "/htt - ouvrir les options"
 L["/htt unlock, /htt lock - move the icon"] = "/htt unlock, /htt lock - déplacer l'icône"
 L["/htt test - show a test trap"] = "/htt test - afficher un piège de test"
+L["/htt clear - clear the countdown, should it go wrong"] = "/htt clear - effacer le compte à rebours, s'il se trompe"
+L["countdown cleared."] = "compte à rebours effacé."
+L["there is no countdown to clear."] = "il n'y a aucun compte à rebours à effacer."
 L["/htt reset - restore the default settings"] = "/htt reset - rétablir les paramètres par défaut"
 L["open the game menu, then Options > AddOns > Hunter Trap Timer."] = "ouvrez le menu de jeu, puis Options > Add-ons > Hunter Trap Timer."
 
@@ -19,13 +22,11 @@ L["open the game menu, then Options > AddOns > Hunter Trap Timer."] = "ouvrez le
 L["Drag to move, then /htt lock"] = "Faites glisser pour déplacer, puis /htt lock"
 
 -- Options
-L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains. In a group other players' auras could be taken for it, so there the countdown runs to its end."] = "Affiche combien de temps votre piège reste armé : 60 secondes, sauf si quelque chose marche dessus. WoW Forever cache le journal de combat aux add-ons, ainsi que les auras des ennemis en combat ; un piège qui se déclenche est donc reconnu à une nouvelle aura sur un ennemi que rien d'autre n'explique. En groupe, les auras des autres joueurs pourraient être prises pour lui ; le compte à rebours va donc jusqu'au bout."
+L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains, such as a spell of yours, your pet's or your group's. In a group, an effect that comes without a spell, such as a poison, can now and then be taken for it."] = "Affiche combien de temps votre piège reste armé : 60 secondes, sauf si quelque chose marche dessus. WoW Forever cache le journal de combat aux add-ons, ainsi que les auras des ennemis en combat ; un piège qui se déclenche est donc reconnu à une nouvelle aura sur un ennemi que rien d'autre n'explique, comme un sort de vous, de votre familier ou de votre groupe. En groupe, un effet venu sans sort, comme un poison, peut parfois être pris pour lui."
 L["Icon"] = "Icône"
 L["Lock the icon"] = "Verrouiller l'icône"
 L["Unlocked, the icon stays on screen and can be dragged with the mouse."] = "Déverrouillée, l'icône reste à l'écran et peut être déplacée à la souris."
 L["Icon size"] = "Taille de l'icône"
-L["Count down the effect once the trap springs"] = "Décompter l'effet une fois le piège déclenché"
-L["The icon turns green and counts down the effect on the enemy, such as the freeze of %s. It ends early if the enemy dies, and a freeze also if the enemy takes damage."] = "L'icône devient verte et décompte l'effet sur l'ennemi, comme le gel de %s. Il prend fin plus tôt si l'ennemi meurt, et un gel aussi si l'ennemi subit des dégâts."
 L["Test"] = "Tester"
 L["Shows a trap that runs out in 15 seconds."] = "Affiche un piège qui expire au bout de 15 secondes."
 L["Reset position"] = "Réinitialiser la position"

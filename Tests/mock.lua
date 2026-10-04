@@ -37,7 +37,7 @@ local KNOWN_EVENTS = {}
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "UNIT_AURA", "UNIT_COMBAT", "SPELL_UPDATE_COOLDOWN",
     "PLAYER_TOTEM_UPDATE", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "UNIT_SPELLCAST_SENT",
     "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED",
-    "NAME_PLATE_UNIT_REMOVED" }) do
+    "NAME_PLATE_UNIT_REMOVED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT" }) do
     KNOWN_EVENTS[e] = true
 end
 -- Registering these is forbidden on Forever; the addon must never try.
@@ -266,6 +266,8 @@ UISpecialFrames = {}
 ChatFontNormal = {}
 GameTooltip = setmetatable({}, { __index = function() return function() end end })
 SOUNDKIT = { RAID_WARNING = 8959 }
+RESIST, IMMUNE = "Resist", "Immune"
+CombatFeedbackText = { RESIST = RESIST, IMMUNE = IMMUNE }
 function PlaySound(id, channel) assert(type(id) == "number") M.sounds[#M.sounds + 1] = id end
 
 C_Timer = { After = function(delay, fn) M.timers[#M.timers + 1] = { at = M.time + delay, fn = fn } end }
@@ -307,12 +309,20 @@ function UnitGUID(unit) local u = M.units[unit] return u and (u.secretGUID and S
 function UnitCanAttack(_, unit) local u = M.units[unit] return u ~= nil and not u.friendly end
 function UnitIsDead(unit) local u = M.units[unit] return u ~= nil and u.dead == true end
 function IsInGroup() return M.inGroup == true end
+-- A unit made with isPlayer or isPet is the player or the pet under another name.
+function UnitIsUnit(a, b)
+    if a == b then return true end
+    local u = M.units[a]
+    return u ~= nil and (b == "player" and u.isPlayer == true or b == "pet" and u.isPet == true)
+end
 
 M.spellNames = {
     [1499] = "Freezing Trap", [14310] = "Freezing Trap", [14311] = "Freezing Trap", [99001] = "Freezing Trap",
     [13795] = "Immolation Trap", [14302] = "Immolation Trap", [13809] = "Frost Trap", [13813] = "Explosive Trap",
     [3355] = "Freezing Trap Effect", [14309] = "Freezing Trap Effect", [13797] = "Immolation Trap Effect",
-    [75] = "Auto Shot", [14282] = "Arcane Shot", [17253] = "Bite",
+    [75] = "Auto Shot", [14282] = "Arcane Shot", [3044] = "Arcane Shot", [17253] = "Bite", [16827] = "Claw",
+    [2973] = "Raptor Strike", [14261] = "Raptor Strike", [1978] = "Serpent Sting", [13550] = "Serpent Sting",
+    [26177] = "Charge",
 }
 C_Spell = {
     GetSpellName = function(id) return M.spellNames[id] end,
@@ -384,7 +394,7 @@ function M.AddAura(token, spellID, duration, opts)
     M.lastInstanceID = M.lastInstanceID + 1
     local aura = {
         spellId = spellID, name = M.spellNames[spellID], icon = "icon:" .. spellID,
-        sourceUnit = opts.source or "player", isFromPlayerOrPlayerPet = opts.source == nil,
+        sourceUnit = opts.source or "player", isFromPlayerOrPlayerPet = opts.source == nil or opts.fromPlayer == true,
         duration = duration, expirationTime = (opts.appliedAt or M.time) + duration, secret = opts.secret,
         auraInstanceID = M.lastInstanceID, cc = spellID == 3355 or spellID == 14308 or spellID == 14309,
     }
