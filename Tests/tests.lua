@@ -461,7 +461,7 @@ eq(sliders[1].value, 37, "and the options show it")
 -- under the player frame.
 local anchorPoint = HunterTrapTimerFrame.points[1]
 check(anchorPoint[1] == "CENTER" and anchorPoint[2] == PlayerFrame and anchorPoint[3] == "BOTTOM"
-    and anchorPoint[4] == -16.5 and anchorPoint[5] == 8.5, "centered under the player frame where a lone totem shows")
+    and anchorPoint[4] == -46.5 and anchorPoint[5] == 2, "under the player's portrait, clear of the pet frame")
 
 -- At the player frame's scale, as totems are, even after Edit Mode resizes it.
 PlayerFrame:SetScale(1.25)

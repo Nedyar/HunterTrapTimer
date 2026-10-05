@@ -29,8 +29,14 @@ local ROUND_RING = 30 / TOTEM_SIZE
 -- centered put the icon near the middle; the user saw totems sit further
 -- left. Screenshots side by side, 2026-10-05, then matched the ring's top left
 -- edge to the pixel.) The icon is anchored by its center there, so that any
--- size stays centered where a totem is.
-local PLAYER_X, PLAYER_Y = -16.5, 8.5
+-- size stays centered where a totem is. A hunter's pet frame, though, sits
+-- right there, its round portrait into the icon; between it and the player's
+-- portrait there is no room for a totem's icon (screenshots, 2026-10-06). So
+-- the icon goes 30 pixels left and 6.5 down from the totem's place: under the
+-- player's portrait, some 10 pixels right of the level circle and 5 below the
+-- portrait's frame, clear of the pet frame (the user's choice, over stacking
+-- it below the pet frame as Blizzard does with totems).
+local PLAYER_X, PLAYER_Y = -16.5 - 30, 8.5 - 6.5
 -- A totem's seconds: GameFontNormalSmall, gold from a minute up, white below
 -- (AuraButtonMixin:UpdateDuration, BUFF_DURATION_WARNING_TIME).
 local GOLD = { 1, 0.82, 0 }

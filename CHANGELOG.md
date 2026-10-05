@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- **The icon no longer covers your pet's frame**: by default it now sits under your portrait, clear of it.
+
 ## 0.1.0 - First release
 
 - **Countdown for your armed trap**: an icon with a clock sweep and the seconds left of its 60, for Immolation, Freezing, Frost and Explosive Trap. A new trap replaces the old one.

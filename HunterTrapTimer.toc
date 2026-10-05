@@ -12,7 +12,7 @@
 ## Notes-zhCN: 显示你的猎人陷阱在消失前还能保持多久。
 ## Notes-zhTW: 顯示你的獵人陷阱在消失前還能維持多久。
 ## Author: Nedyar
-## Version: 0.1.0
+## Version: 0.1.1
 ## SavedVariables: HunterTrapTimerDB
 ## IconTexture: Interface\Icons\Spell_Frost_ChainsOfIce
 

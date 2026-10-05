@@ -180,7 +180,7 @@ local function CreatePage()
     local playerFrame = HUD_EDIT_MODE_PLAYER_FRAME_LABEL or "Player Frame"
     CreateChoice(page, 20, -170, "position", L["Position"], {
         { value = "player", text = L["Under the %s"]:format(playerFrame),
-            tooltip = L["Where a shaman's totems show. It follows the %s when Edit Mode moves it."]:format(playerFrame) },
+            tooltip = L["Under your portrait, clear of your pet's frame. It follows the %s when Edit Mode moves it."]:format(playerFrame) },
         { value = "free", text = L["Free"],
             tooltip = L["Where you drag it while the icon is unlocked."] },
     })
