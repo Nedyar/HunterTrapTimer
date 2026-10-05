@@ -6,5 +6,6 @@
 - **Warning before it runs out**: the seconds turn red, the icon flashes and a sound plays, 10 seconds before by default (adjustable, or off).
 - **Notices when the trap springs, even in combat**, and the icon goes: by a new aura on an enemy that nothing else explains (a spell of yours, your pet's or your group's), or by fire damage, a resist or an immunity of the trap's school on an enemy.
 - **Keeps the countdown through a /reload**, and `/htt clear` clears it should it ever go wrong.
-- **Options**: lock and move the icon, its size and the warning. `/htt test` shows a test trap.
+- **Shown like a totem** by default: a round icon in a totem's ring, the seconds below it, under the player frame, with a tooltip giving the trap's name, rank and time left.
+- **Options**: round or square, the seconds below or on the icon, under the player frame or anywhere you drag it, its size, and the warning. `/htt test` shows a test trap.
 - **Translated into every client language**: English, German, Spanish, French, Italian, Korean, Portuguese, Russian and Chinese.

@@ -65,33 +65,48 @@ end
 local function Icons()
     local list = {}
     for _, f in ipairs(M.allFrames) do
-        if f.parent == HunterTrapTimerFrame and f.cooldown then
+        if f.parent == HunterTrapTimerFrame and f.roundSweep then
             list[#list + 1] = f
         end
     end
     return list
 end
--- The seconds shown on icon index now, or nil when it is not on screen. The
--- icons are redrawn first: between ticks they lag by up to one tick.
-local function IconText(index)
+-- The text shown on icon index now ("37 s" below it, 37 on it), or nil when
+-- it is not on screen. The icons are redrawn first: between ticks they lag by
+-- up to one tick.
+local function IconLabel(index)
     ns.Display.Refresh()
     local icon = Icons()[index]
     return icon and M.Visible(icon) and icon.text.textValue or nil
+end
+-- The seconds in that text.
+local function IconText(index)
+    local label = IconLabel(index)
+    return label and tonumber(tostring(label):match("%d+")) or label
 end
 local function IconColor(index)
     local color = Icons()[index].text.color
     return ("%g,%g,%g"):format(color[1], color[2], color[3])
 end
-local WHITE, RED = "1,1,1", "1,0.25,0.25"
+local WHITE, RED, GOLD = "1,1,1", "1,0.25,0.25", "1,0.82,0"
 
-local function Frames(kind)
+-- The frames of a kind, or of a kind and template.
+local function Frames(kind, template)
     local list = {}
     for _, f in ipairs(M.allFrames) do
-        if f.kind == kind then
+        if f.kind == kind and (not template or f.template == template) then
             list[#list + 1] = f
         end
     end
     return list
+end
+-- The options page's radio button showing text.
+local function Radio(text)
+    for _, f in ipairs(Frames("CheckButton", "UIRadioButtonTemplate")) do
+        if f.text.textValue == text then
+            return f
+        end
+    end
 end
 local function Button(text)
     for _, f in ipairs(Frames("Button")) do
@@ -118,7 +133,7 @@ end
 ---------------------------------------------------------------------------
 ns = NewSession()
 NoErrors("during login")
-eq(ns.db.iconSize, 48, "defaults loaded")
+eq(ns.db.iconSize, 37, "defaults loaded: a totem's size")
 check(M.mainCategory and M.mainCategory.name == "Hunter Trap Timer", "settings category registered")
 check(M.addonCategory == M.mainCategory, "registered as addon category")
 eq(SLASH_HUNTERTRAPTIMER1, "/htt", "slash command")
@@ -130,13 +145,14 @@ eq(ns.Traps.armed and ns.Traps.armed.trap.key, "freezing", "Freezing Trap is arm
 eq(IconText(1), 60, "the icon counts from 60")
 local icon = Icons()[1]
 eq(icon.texture.path, "icon:1499", "the trap's icon")
-eq(icon.cooldown.start, M.time, "the sweep starts now")
-eq(icon.cooldown.duration, 60, "the sweep lasts 60 seconds")
-check(icon.cooldown.reverse, "the lit part is the time left")
-eq(IconColor(1), WHITE, "white while plenty of time is left")
+eq(icon.sweep.start, M.time, "the sweep starts now")
+eq(icon.sweep.duration, 60, "the sweep lasts 60 seconds")
+check(icon.sweep.reverse, "the lit part is the time left")
+eq(IconColor(1), GOLD, "a full minute shows gold, as a totem's")
 
 M.Advance(20)
 eq(IconText(1), 40, "40 seconds left after 20")
+eq(IconColor(1), WHITE, "under a minute, white, as a totem's")
 M.Advance(29.875)
 eq(#M.sounds, 0, "no warning with more than 10 seconds left")
 check(not icon.flash:IsPlaying(), "no flash yet")
@@ -367,13 +383,15 @@ Slash("unlock")
 eq(ns.db.locked, false, "/htt unlock")
 check(M.Visible(HunterTrapTimerFrame), "the icon shows to be moved")
 eq(IconText(1), 60, "as a placeholder")
-check(HunterTrapTimerFrame.mouse, "and takes the mouse")
+check(HunterTrapTimerFrame.mouseClick, "and takes clicks, to be dragged")
 HunterTrapTimerFrame.scripts.OnDragStart(HunterTrapTimerFrame)
 check(HunterTrapTimerFrame.moving, "it can be dragged")
 HunterTrapTimerFrame.center = { 1060, 640 }
 HunterTrapTimerFrame.scripts.OnDragStop(HunterTrapTimerFrame)
 HunterTrapTimerFrame.center = nil
 eq(ns.db.x, 100, "the new position is saved (x)")
+eq(ns.db.position, "free", "dragging frees the icon from the player frame")
+eq(HunterTrapTimerFrame.userPlaced, false, "and leaves its place out of the client's layout cache")
 eq(ns.db.y, 100, "the new position is saved (y)")
 local point = HunterTrapTimerFrame.points[1]
 check(point[1] == "CENTER" and point[4] == 100 and point[5] == 100, "and applied")
@@ -382,8 +400,10 @@ eq(ns.db.locked, true, "/htt lock")
 check(not M.Visible(HunterTrapTimerFrame), "the placeholder goes")
 HunterTrapTimerFrame.scripts.OnDragStart(HunterTrapTimerFrame)
 check(not HunterTrapTimerFrame.moving, "a locked icon cannot be dragged")
+check(not HunterTrapTimerFrame.mouseClick and HunterTrapTimerFrame.mouseMotion,
+    "locked, clicks go through it, but the mouse still brings its tooltip")
 
-local boxes, sliders = Frames("CheckButton"), Frames("Slider")
+local boxes, sliders = Frames("CheckButton", "UICheckButtonTemplate"), Frames("Slider")
 eq(#boxes, 3, "three checkboxes")
 eq(#sliders, 2, "two sliders")
 boxes[1]:SetChecked(false)
@@ -395,12 +415,14 @@ boxes[1]:Click()
 sliders[1]:SetValue(64, true)
 eq(ns.db.iconSize, 64, "the size slider")
 M.Cast(1499)
-eq(Icons()[1].w, 64, "the icon grows")
-eq(Icons()[1].text.font[2], 27, "and so do its seconds")
+eq(HunterTrapTimerFrame.w, 64, "the icon grows")
+eq(Icons()[1].text.font[2], 17, "and so do its seconds, in a totem's font")
 
 Button("Reset position"):Click()
 eq(ns.db.x, 0, "Reset position puts the icon back (x)")
 eq(ns.db.y, -150, "Reset position puts the icon back (y)")
+eq(ns.db.position, "player", "under the player frame")
+check(Radio("Under the Player Frame").checked, "and the option shows it")
 
 sliders[2]:SetValue(0, true)
 eq(ns.db.warnSeconds, 0, "the warning slider")
@@ -432,8 +454,83 @@ M.Advance(16)
 
 Slash("reset")
 eq(ns.db.warnSound, true, "/htt reset restores the defaults")
-eq(ns.db.iconSize, 48, "including the size")
-eq(sliders[1].value, 48, "and the options show it")
+eq(ns.db.iconSize, 37, "including the size")
+eq(sliders[1].value, 37, "and the options show it")
+
+-- By default the icon is a totem's: round, in a ring, the seconds below it,
+-- under the player frame.
+local anchorPoint = HunterTrapTimerFrame.points[1]
+check(anchorPoint[1] == "CENTER" and anchorPoint[2] == PlayerFrame and anchorPoint[3] == "BOTTOM"
+    and anchorPoint[4] == -16.5 and anchorPoint[5] == 8.5, "centered under the player frame where a lone totem shows")
+
+-- At the player frame's scale, as totems are, even after Edit Mode resizes it.
+PlayerFrame:SetScale(1.25)
+ns.Display.Refresh()
+eq(HunterTrapTimerFrame:GetScale(), 1.25, "the icon follows the player frame's scale")
+-- Dragged from there, it is free where it was left, at the screen's scale.
+Slash("unlock")
+HunterTrapTimerFrame.scripts.OnDragStart(HunterTrapTimerFrame)
+HunterTrapTimerFrame.center = { 848, 512 }
+HunterTrapTimerFrame.scripts.OnDragStop(HunterTrapTimerFrame)
+HunterTrapTimerFrame.center = nil
+eq(ns.db.x .. "," .. ns.db.y, "100,100", "a scaled icon is saved where it is on the screen")
+eq(HunterTrapTimerFrame:GetScale(), 1, "free, it has the screen's scale")
+Slash("lock")
+Button("Reset position"):Click()
+eq(HunterTrapTimerFrame:GetScale(), 1.25, "back under the player frame, its scale again")
+PlayerFrame:SetScale(1)
+ns.Display.Refresh()
+
+-- Its tooltip, as a totem's: the trap, its rank and the time left.
+M.Cast(1499)
+HunterTrapTimerFrame.scripts.OnEnter(HunterTrapTimerFrame)
+check(GameTooltip:IsOwned(HunterTrapTimerFrame) and GameTooltip.shown, "the mouse over the icon shows its tooltip")
+eq(table.concat(GameTooltip.lines, " / "), "Freezing Trap / Rank 1 / 60 |4second:seconds; remaining",
+    "the trap's name, rank and time left")
+M.Advance(10)
+eq(GameTooltip.lines[3], "50 |4second:seconds; remaining", "counting down with the icon")
+HunterTrapTimerFrame.scripts.OnLeave(HunterTrapTimerFrame)
+check(not GameTooltip.shown, "and goes when the mouse leaves")
+HunterTrapTimerFrame.scripts.OnEnter(HunterTrapTimerFrame)
+Slash("clear")
+check(not GameTooltip.shown, "or when the trap is gone")
+Slash("unlock")
+HunterTrapTimerFrame.scripts.OnEnter(HunterTrapTimerFrame)
+eq(GameTooltip.lines[2], "Drag to move, then /htt lock", "unlocked with no trap, it says how to move the icon")
+HunterTrapTimerFrame.scripts.OnLeave(HunterTrapTimerFrame)
+Slash("lock")
+M.Cast(1499)
+local totem = Icons()[1]
+check(totem.texture:IsMasked(), "the icon is cut round")
+check(totem.ring.shown and totem.ring.atlas == "UI-HUD-UnitFrame-TotemFrame", "in a totem's ring")
+check(not totem.edge.shown, "without the square edge")
+eq(totem.sweep, totem.roundSweep, "with the round sweep")
+eq(totem.roundSweep.swipeTexture, "Interface/Common/CommonMaskCircle", "drawn with the circle")
+eq(totem.texture.w, 22, "the icon is a totem's 22 pixels")
+eq(IconLabel(1), "60 s", "the seconds below, as a totem's")
+eq(totem.text.points[1][1] .. " " .. totem.text.points[1][3], "TOP BOTTOM", "below the icon")
+
+-- Square, the seconds on it, and back.
+Radio("Square"):Click()
+eq(ns.db.shape, "square", "the shape option")
+check(not totem.texture:IsMasked(), "a square icon is not cut")
+check(not totem.ring.shown and totem.edge.shown, "and has the square edge")
+eq(totem.sweep, totem.squareSweep, "and the square sweep")
+check(not totem.roundSweep.shown, "the round sweep is hidden")
+eq(totem.squareSweep.duration, 60, "the sweep is set again on the new shape")
+Radio("On the icon"):Click()
+eq(ns.db.seconds, "center", "the seconds option")
+eq(IconLabel(1), 60, "on the icon, just the number")
+eq(totem.text.points[1][1], "CENTER", "in its middle")
+Radio("Round, like a totem"):Click()
+check(totem.texture:IsMasked() and totem.sweep == totem.roundSweep, "round again")
+Radio("Below the icon"):Click()
+Radio("Free"):Click()
+eq(HunterTrapTimerFrame.points[1][2], UIParent, "free: where it was left on the screen")
+Radio("Under the Player Frame"):Click()
+eq(HunterTrapTimerFrame.points[1][2], PlayerFrame, "and back under the player frame")
+M.Advance(61)
+NoErrors("changing the icon")
 
 Slash("")
 M.Advance(0.5)
@@ -556,9 +653,25 @@ eq(ns.db.y, 4000, "a far y is brought back")
 eq(ns.db.locked, true, "a bad lock is replaced")
 eq(ns.db.showEffect, nil, "the old effect setting is dropped")
 eq(ns.db.warnFlash, false, "good settings are kept")
-eq(ns.db.version, 1, "the version is set")
+eq(ns.db.version, 2, "the version is set")
 ns = NewSession({ saved = { iconSize = 0 / 0 } })
-eq(ns.db.iconSize, 48, "NaN is replaced")
+eq(ns.db.iconSize, 37, "NaN is replaced")
+ns = NewSession({ saved = { position = "left", shape = "star", seconds = 3 } })
+eq(ns.db.position .. " " .. ns.db.shape .. " " .. ns.db.seconds, "player round below", "bad choices are replaced")
+
+-- Version 1's square icon, free on the screen, moves to the totem's look
+-- and place, unless it was moved or resized by hand.
+ns = NewSession({ saved = { version = 1, iconSize = 48, x = 0, y = -150 } })
+eq(ns.db.iconSize, 37, "version 1's default size becomes a totem's")
+eq(ns.db.position, "player", "and its default place the player frame")
+eq(ns.db.shape, "round", "and it is round")
+ns = NewSession({ saved = { version = 1, iconSize = 64, x = 200, y = 10 } })
+eq(ns.db.iconSize, 64, "a size of one's own is kept")
+eq(ns.db.position, "free", "a moved icon stays where it was")
+eq(HunterTrapTimerFrame.points[1][4], 200, "at its place")
+ns = NewSession({ saved = { version = 2, iconSize = 48 } })
+eq(ns.db.iconSize, 48, "from version 2 on, 48 is the player's own size")
+NoErrors("moving the settings on")
 
 ---------------------------------------------------------------------------
 -- Session 2b: a /reload keeps the armed trap; a new login does not.
@@ -583,7 +696,7 @@ end
 LeaveAndCome(1499, 20, true)
 eq(ns.Traps.armed and ns.Traps.armed.trap.key, "freezing", "after a /reload the trap is armed again")
 eq(IconText(1), 38, "with the time it has left")
-eq(Icons()[1].cooldown.duration, 60, "and its whole sweep")
+eq(Icons()[1].sweep.duration, 60, "and its whole sweep")
 eq(ns.db.armed, nil, "the saved trap is cleared once taken back")
 M.Advance(28.125)
 eq(#M.sounds, 1, "its warning still comes")
@@ -670,7 +783,7 @@ for _, locale in ipairs({ "deDE", "esES", "esMX", "frFR", "itIT", "koKR", "ptBR"
     eq(#badSpecs, 0, locale .. ": placeholders kept" .. (badSpecs[1] and (" (" .. badSpecs[1] .. ")") or ""))
     eq(#stale, 0, locale .. ": no unused texts" .. (stale[1] and (" (" .. stale[1] .. ")") or ""))
     -- The options page, the icon and the commands work in this language.
-    eq(Frames("CheckButton")[1].Text.textValue, L["Lock the icon"], locale .. ": options page translated")
+    eq(Frames("CheckButton", "UICheckButtonTemplate")[1].Text.textValue, L["Lock the icon"], locale .. ": options page translated")
     eq(Frames("Slider")[2].Text.textValue, L["Seconds left"] .. ": |cffffffff" .. L["%d s"]:format(10) .. "|r",
         locale .. ": seconds in the client's language")
     local before = #M.printed

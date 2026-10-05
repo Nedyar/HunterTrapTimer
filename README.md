@@ -9,6 +9,12 @@ how long your hunter trap stays armed before it vanishes.
   Freezing, Frost or Explosive Trap, an icon shows it with a clock sweep and
   the seconds left: an armed trap lasts 60 seconds unless something steps on
   it. Only one trap can be down at a time, so a new one replaces the old.
+- **Shown like a totem.** By default the icon looks and sits like a
+  shaman's totem: round, in a totem's ring, with the seconds below it, under
+  the player frame and at its scale (following it when Edit Mode moves or
+  resizes it). Its tooltip, as a totem's, gives the trap's name, rank and
+  time left. The options make it square, put the seconds on it, resize it,
+  or free it to be dragged anywhere.
 - **Warning before it runs out.** With 10 seconds left (adjustable, or off)
   the seconds turn red, the icon flashes and a sound plays.
 - **Notices when the trap springs.** A trap that springs is gone, so its
@@ -24,7 +30,8 @@ how long your hunter trap stays armed before it vanishes.
 1. Copy the `HunterTrapTimer` folder into
    `World of Warcraft\_classic_beta_\Interface\AddOns\`.
 2. Put a trap down, or try `/htt test`. To move the icon, `/htt unlock`, drag
-   it, then `/htt lock`.
+   it, then `/htt lock`; **Reset position** in the options puts it back under
+   the player frame.
 3. The options are under the game menu: Options > AddOns > Hunter Trap Timer
    (or `/htt`).
 

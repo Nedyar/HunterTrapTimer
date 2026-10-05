@@ -86,7 +86,22 @@ function FontString:GetStringWidth() return #tostring(self.textValue or "") * 6 
 local Texture = setmetatable({}, { __index = Region })
 function Texture:SetColorTexture(r, g, b, a) self.color = { r, g, b, a } end
 function Texture:SetTexture(path) assert(path ~= nil, "SetTexture(nil)") self.path = path end
-function Texture:SetTexCoord() end
+function Texture:SetTexCoord(...) self.texCoord = { ... } end
+-- Atlases the client has (the ones the addon uses, from Blizzard's TotemFrame.xml).
+M.atlases = { CircleMask = true, ["UI-HUD-UnitFrame-TotemFrame"] = true }
+function Texture:SetAtlas(atlas) assert(M.atlases[atlas], "unknown atlas " .. tostring(atlas)) self.atlas = atlas end
+-- Masks: a texture keeps the masks added to it; removing one it lacks raises.
+function Texture:AddMaskTexture(mask)
+    assert(mask.kind == "MaskTexture", "AddMaskTexture needs a mask")
+    self.masks = self.masks or {}
+    assert(not self.masks[mask], "mask added twice")
+    self.masks[mask] = true
+end
+function Texture:RemoveMaskTexture(mask)
+    assert(self.masks and self.masks[mask], "RemoveMaskTexture of a mask not added")
+    self.masks[mask] = nil
+end
+function Texture:IsMasked() return self.masks ~= nil and next(self.masks) ~= nil end
 
 local FontStringMeta, TextureMeta = Strict(FontString, "FontString"), Strict(Texture, "Texture")
 local function NewRegion(kind, parent)
@@ -131,6 +146,7 @@ function Frame:SetFrameLevel(l) assert(type(l) == "number" and l >= 0 and l <= 1
 function Frame:GetFrameLevel() return self.level or 1 end
 function Frame:CreateFontString(name, layer, template) return NewRegion("FontString", self) end
 function Frame:CreateTexture(name, layer) return NewRegion("Texture", self) end
+function Frame:CreateMaskTexture() return NewRegion("MaskTexture", self) end
 function Frame:CreateAnimationGroup() return setmetatable({}, AnimationGroupMeta) end
 function Frame:SetHitRectInsets(l, r, t, b) assert(type(r) == "number") end
 function Frame:EnableMouseWheel() end
@@ -167,7 +183,13 @@ function Frame:SetScrollChild(child) self.scrollChild = child end
 -- Movable frames: the position is a center (x, y) in screen pixels.
 function Frame:SetMovable(movable) self.movable = movable end
 function Frame:SetClampedToScreen() end
+function Frame:SetUserPlaced(placed) self.userPlaced = placed end
 function Frame:EnableMouse(enabled) self.mouse = enabled end
+function Frame:SetMouseMotionEnabled(enabled) self.mouseMotion = enabled end
+function Frame:SetMouseClickEnabled(enabled) self.mouseClick = enabled end
+function Frame:SetScale(scale) assert(type(scale) == "number" and scale > 0, "bad scale") self.scale = scale end
+function Frame:GetScale() return self.scale or 1 end
+function Frame:GetEffectiveScale() return (self.scale or 1) * (self.parent and self.parent:GetEffectiveScale() or 1) end
 function Frame:RegisterForDrag() end
 function Frame:StartMoving() assert(self.movable, "StartMoving on a frame that is not movable") self.moving = true end
 function Frame:StopMovingOrSizing() self.moving = false end
@@ -192,6 +214,12 @@ function Frame:SetReverse(r) assert(self.kind == "Cooldown") self.reverse = r en
 function Frame:SetDrawEdge() assert(self.kind == "Cooldown") end
 function Frame:SetDrawBling() assert(self.kind == "Cooldown") end
 function Frame:SetHideCountdownNumbers(h) assert(self.kind == "Cooldown") self.hideNumbers = h end
+function Frame:SetSwipeColor(r, g, b, a) assert(self.kind == "Cooldown") self.swipeColor = { r, g, b, a } end
+function Frame:SetSwipeTexture(path) assert(self.kind == "Cooldown" and type(path) == "string") self.swipeTexture = path end
+function Frame:SetTexCoordRange(low, high)
+    assert(self.kind == "Cooldown" and type(low.x) == "number" and type(high.y) == "number", "bad SetTexCoordRange")
+    self.texCoordRange = { low, high }
+end
 local FrameMeta = Strict(Frame, "Frame")
 
 local templates = {
@@ -200,6 +228,7 @@ local templates = {
         f.Text, f.Low, f.High = f:CreateFontString(), f:CreateFontString(), f:CreateFontString()
     end,
     UIPanelButtonTemplate = function() end,
+    UIRadioButtonTemplate = function(f) f.text = f:CreateFontString() end,
     PortraitFrameTemplate = function() end,
     UIPanelScrollFrameTemplate = function() end,
     CooldownFrameTemplate = function(f) assert(f.kind == "Cooldown") end,
@@ -264,8 +293,29 @@ UIParent = CreateFrame("Frame", "UIParent")
 UIParent.center = { 960, 540 }
 UISpecialFrames = {}
 ChatFontNormal = {}
-GameTooltip = setmetatable({}, { __index = function() return function() end end })
+-- The tooltip keeps its owner and lines, for the icon's tooltip.
+GameTooltip = { lines = {} }
+function GameTooltip:SetOwner(owner, anchor) self.owner, self.anchor, self.lines, self.shown = owner, anchor, {}, false end
+function GameTooltip:SetText(text) self.lines = { text } end
+function GameTooltip:AddLine(text) self.lines[#self.lines + 1] = text end
+function GameTooltip:Show() self.shown = true end
+function GameTooltip:Hide() self.shown, self.owner = false, nil end
+function GameTooltip:IsOwned(frame) return self.owner == frame end
 SOUNDKIT = { RAID_WARNING = 8959 }
+-- Blizzard's player frame, and the texts the client translates.
+PlayerFrame = CreateFrame("Frame", "PlayerFrame", UIParent)
+SECOND_ONELETTER_ABBR = "%d s"
+BUFF_DURATION_WARNING_TIME = 60
+GameFontNormalSmall = { GetFont = function() return "Fonts\\FRIZQT__.TTF", 10, "" end }
+SPELL_TIME_REMAINING_SEC = "%d |4second:seconds; remaining"
+HUD_EDIT_MODE_PLAYER_FRAME_LABEL = "Player Frame"
+C_Texture = {
+    GetAtlasInfo = function(atlas)
+        if atlas == "CircleMask" then
+            return { file = "Interface/Common/CommonMaskCircle", leftTexCoord = 0, rightTexCoord = 1, topTexCoord = 0, bottomTexCoord = 1 }
+        end
+    end,
+}
 RESIST, IMMUNE = "Resist", "Immune"
 CombatFeedbackText = { RESIST = RESIST, IMMUNE = IMMUNE }
 function PlaySound(id, channel) assert(type(id) == "number") M.sounds[#M.sounds + 1] = id end
@@ -327,6 +377,7 @@ M.spellNames = {
 C_Spell = {
     GetSpellName = function(id) return M.spellNames[id] end,
     GetSpellTexture = function(id) return M.spellNames[id] and ("icon:" .. id) or nil end,
+    GetSpellSubtext = function(id) return ({ [1499] = "Rank 1", [14311] = "Rank 3" })[id] or "" end,
     GetSpellCooldown = function(id)
         if M.combat then return { startTime = SECRET, duration = SECRET, isEnabled = true, isActive = true, modRate = 1 } end
         return { startTime = 0, duration = 0, isEnabled = true, isActive = false, modRate = 1 }

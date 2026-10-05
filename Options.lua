@@ -104,6 +104,40 @@ local function CreateSlider(page, x, y, width, key, label, format)
     end
 end
 
+-- A label followed by radio buttons on one line, bound to a setting.
+local function CreateChoice(page, x, y, key, label, choices)
+    local title = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    title:SetPoint("TOPLEFT", x, y)
+    title:SetText(label)
+    local buttons = {}
+    local function Refresh()
+        for _, button in ipairs(buttons) do
+            button:SetChecked(ns.db[key] == button.value)
+        end
+    end
+    for i, choice in ipairs(choices) do
+        local button = CreateFrame("CheckButton", nil, page, "UIRadioButtonTemplate")
+        if i == 1 then
+            button:SetPoint("LEFT", title, "RIGHT", 10, 0)
+        else
+            button:SetPoint("LEFT", buttons[i - 1].text, "RIGHT", 14, 0)
+        end
+        button.text:SetFontObject("GameFontHighlightSmall")
+        button.text:SetText(choice.text)
+        button:SetHitRectInsets(0, -(button.text:GetStringWidth() + 5), 0, 0)
+        button.value = choice.value
+        button:SetScript("OnClick", function(self)
+            Set(key, self.value)
+            Refresh()
+        end)
+        if choice.tooltip then
+            SetTooltip(button, choice.text, choice.tooltip)
+        end
+        buttons[i] = button
+    end
+    refreshers[#refreshers + 1] = Refresh
+end
+
 local function CreateButton(page, text, onClick)
     local button = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
     button:SetHeight(22)
@@ -142,24 +176,41 @@ local function CreatePage()
     CreateHeader(page, L["Icon"], 16, -110, 620)
     CreateOption(page, 16, -134, "locked", L["Lock the icon"],
         L["Unlocked, the icon stays on screen and can be dragged with the mouse."])
-    CreateSlider(page, 24, -182, 220, "iconSize", L["Icon size"], function(value)
+    -- The player frame's name is the client's own, as Edit Mode shows it.
+    local playerFrame = HUD_EDIT_MODE_PLAYER_FRAME_LABEL or "Player Frame"
+    CreateChoice(page, 20, -170, "position", L["Position"], {
+        { value = "player", text = L["Under the %s"]:format(playerFrame),
+            tooltip = L["Where a shaman's totems show. It follows the %s when Edit Mode moves it."]:format(playerFrame) },
+        { value = "free", text = L["Free"],
+            tooltip = L["Where you drag it while the icon is unlocked."] },
+    })
+    CreateChoice(page, 20, -196, "shape", L["Shape"], {
+        { value = "round", text = L["Round, like a totem"] },
+        { value = "square", text = L["Square"] },
+    })
+    CreateChoice(page, 20, -222, "seconds", L["Seconds"], {
+        { value = "below", text = L["Below the icon"] },
+        { value = "center", text = L["On the icon"] },
+    })
+    CreateSlider(page, 24, -262, 220, "iconSize", L["Icon size"], function(value)
         return ("%d"):format(value)
     end)
     local test = CreateButton(page, L["Test"], function()
         ns.Traps.Test()
     end)
-    test:SetPoint("TOPLEFT", 20, -222)
+    test:SetPoint("TOPLEFT", 20, -300)
     SetTooltip(test, L["Test"], L["Shows a trap that runs out in 15 seconds."])
     local center = CreateButton(page, L["Reset position"], function()
-        ns.db.x, ns.db.y = ns.DEFAULTS.x, ns.DEFAULTS.y
+        ns.db.position, ns.db.x, ns.db.y = ns.DEFAULTS.position, ns.DEFAULTS.x, ns.DEFAULTS.y
         ns.SettingsChanged()
+        Options.Refresh()
     end)
     center:SetPoint("LEFT", test, "RIGHT", 8, 0)
 
-    CreateHeader(page, L["Warning before it runs out"], 16, -272, 620)
-    CreateSlider(page, 24, -316, 220, "warnSeconds", L["Seconds left"], Seconds)
-    CreateOption(page, 16, -354, "warnFlash", L["Flash the icon"])
-    CreateOption(page, 16, -382, "warnSound", L["Play a sound"])
+    CreateHeader(page, L["Warning before it runs out"], 16, -350, 620)
+    CreateSlider(page, 24, -394, 220, "warnSeconds", L["Seconds left"], Seconds)
+    CreateOption(page, 16, -432, "warnFlash", L["Flash the icon"])
+    CreateOption(page, 16, -460, "warnSound", L["Play a sound"])
 
     return page
 end

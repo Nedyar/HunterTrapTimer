@@ -44,12 +44,16 @@ end
 
 -- Settings -----------------------------------------------------------------
 
+-- By default the icon looks and sits like a shaman's totem (see Display.lua).
 ns.DEFAULTS = {
-    version = 1,
-    x = 0,               -- where the first icon's center is, from the center of the screen
+    version = 2,
+    position = "player", -- "player": under the player frame, where totems show; "free": at x, y
+    x = 0,               -- when free, where the icon's center is, from the center of the screen
     y = -150,
-    locked = true,       -- unlocked, the icon shows and can be dragged
-    iconSize = 48,
+    locked = true,       -- unlocked, the icon shows and can be dragged (which frees it)
+    shape = "round",     -- "round", like a totem, or "square"
+    seconds = "below",   -- the seconds left "below" the icon, like a totem's, or on its "center"
+    iconSize = 37,       -- a totem button's size
     warnSeconds = 10,    -- the warning starts with this many seconds left (0: no warning)
     warnFlash = true,    -- the icon flashes during the warning
     warnSound = true,    -- a sound when the warning starts
@@ -57,9 +61,19 @@ ns.DEFAULTS = {
 
 -- Minimum, maximum and step of the numeric settings.
 ns.LIMITS = {
-    iconSize = { 24, 96, 2 },
+    iconSize = { 20, 96, 1 },
     warnSeconds = { 0, 30, 1 },
 }
+
+-- The values the other settings can take.
+local CHOICES = {
+    position = { player = true, free = true },
+    shape = { round = true, square = true },
+    seconds = { below = true, center = true },
+}
+
+-- Version 1 had a square icon of 48 pixels, free on the screen.
+local V1_ICON_SIZE = 48
 
 -- How far from the center of the screen the icon may be saved.
 local MAX_OFFSET = 4000
@@ -82,10 +96,15 @@ end
 -- Replaces missing or invalid values with the defaults. Runs on the saved
 -- settings.
 function ns.Sanitize(db)
+    local version = IsNumber(db.version) and db.version or 1
     for key, default in pairs(ns.DEFAULTS) do
         local value, limits = db[key], ns.LIMITS[key]
         if limits then
             db[key] = IsNumber(value) and ns.Snap(value, limits[1], limits[2], limits[3]) or default
+        elseif CHOICES[key] then
+            if not CHOICES[key][value] then
+                db[key] = default
+            end
         elseif type(default) == "number" then
             db[key] = IsNumber(value) and Clamp(value, -MAX_OFFSET, MAX_OFFSET) or default
         elseif type(default) == "boolean" and type(value) ~= "boolean" then
@@ -94,6 +113,16 @@ function ns.Sanitize(db)
     end
     -- The effect's countdown, and its setting, are gone.
     db.showEffect = nil
+    -- From version 1 the icon moves to the totem's look and place, unless it
+    -- was given another size or moved by hand: then it keeps them.
+    if version < 2 then
+        if db.iconSize == V1_ICON_SIZE then
+            db.iconSize = ns.DEFAULTS.iconSize
+        end
+        if db.x ~= ns.DEFAULTS.x or db.y ~= ns.DEFAULTS.y then
+            db.position = "free"
+        end
+    end
     db.version = ns.DEFAULTS.version
 end
 
