@@ -77,7 +77,7 @@ end
 -- Whether to log what happens to enemies: while a trap is down,
 -- and for a while after.
 local function Active()
-    if ns.Traps.armed then
+    if next(ns.Traps.armed) then
         activeUntil = GetTime() + AFTER
         return true
     end
@@ -118,20 +118,34 @@ local function EffectText(unit, effectID)
     return "found, " .. AuraText(aura)
 end
 
--- The last trap's effects found on unit, or "none".
+-- The effects found on unit of the last trap of each school, or "none".
 local function EffectsOn(unit)
-    local last = ns.Traps.lastArmed
-    if not last then
+    if not next(ns.Traps.lastArmed) then
         return "no trap yet"
     end
     local found = {}
-    for _, effectID in ipairs(last.trap.effects) do
-        local answer = EffectText(unit, effectID)
-        if answer ~= "none" then
-            found[#found + 1] = ("%d %s"):format(effectID, answer)
+    for _, slot in ipairs(ns.Traps.SLOTS) do
+        local last = ns.Traps.lastArmed[slot]
+        for _, effectID in ipairs(last and last.trap.effects or {}) do
+            local answer = EffectText(unit, effectID)
+            if answer ~= "none" then
+                found[#found + 1] = ("%d %s"):format(effectID, answer)
+            end
         end
     end
     return #found > 0 and table.concat(found, "; ") or "none"
+end
+
+-- The spell of the last trap put down, of either school (they share their
+-- cooldown).
+local function LastTrapSpell()
+    local latest
+    for _, entry in pairs(ns.Traps.lastArmed) do
+        if not latest or entry.start > latest.start then
+            latest = entry
+        end
+    end
+    return latest and latest.spellID
 end
 
 -- The auras on unit that pass filter, by instance ID, as the client lists
@@ -236,7 +250,7 @@ local function OnEvent(_, event, ...)
                 Show(amount), Show(school)))
         end
     elseif event == "SPELL_UPDATE_COOLDOWN" then
-        local spellID = ns.Traps.lastArmed and ns.Traps.lastArmed.spellID
+        local spellID = LastTrapSpell()
         Record(("SPELL_UPDATE_COOLDOWN %s; trap %s: %s"):format(Show((...)), Show(spellID), CooldownText(spellID)))
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         local unit = ...
@@ -257,6 +271,15 @@ local function EntryText(entry)
         entry.start + entry.duration - GetTime())
 end
 
+-- Each slot's armed trap: "fire: ...; frost: none".
+local function ArmedText()
+    local parts = {}
+    for _, slot in ipairs(ns.Traps.SLOTS) do
+        parts[#parts + 1] = ("%s: %s"):format(slot, EntryText(ns.Traps.armed[slot]))
+    end
+    return table.concat(parts, "; ")
+end
+
 local function ReportText()
     local S = C_Secrets or {}
     local lines = {}
@@ -268,7 +291,7 @@ local function ReportText()
     Add("In combat: %s. In a group: %s. Secret restrictions: %s; auras secret: %s; cooldowns secret: %s. Combat log restricted: %s.",
         Ask(InCombatLockdown), Ask(IsInGroup), Ask(S.HasSecretRestrictions), Ask(S.ShouldAurasBeSecret), Ask(S.ShouldCooldownsBeSecret),
         Ask(C_CombatLog and C_CombatLog.IsCombatLogRestricted))
-    Add("Armed: %s.", EntryText(ns.Traps.armed))
+    Add("Armed: %s.", ArmedText())
     Add("")
 
     Add("Trap spells you know (cast secrecy, cooldown secrecy, cooldown secret now; cooldown), then their effects (aura secrecy, aura secret now; on the target):")

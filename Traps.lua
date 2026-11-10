@@ -1,10 +1,12 @@
--- Traps.lua: which trap is down, and how long it has left.
+-- Traps.lua: which traps are down, and how long they have left.
 --
 -- WoW Forever closes the combat log to addons (even registering it is an
 -- error), so a trap is seen through the hunter's own casts, which are never
 -- secret: UNIT_SPELLCAST_SUCCEEDED for "player". An armed trap lasts 60
--- seconds unless something steps on it. Only one trap can be down at a time,
--- whatever its kind (the user, 2026-10-03), so a new one replaces the old.
+-- seconds unless something steps on it. A fire trap and a frost trap can be
+-- down at once; they share their 30 second cooldown, and a new trap replaces
+-- only the one of its own school (the user, at Forever's launch, 2026-11-10;
+-- in the beta they had seen a new trap replace any old one).
 --
 -- A trap that springs is gone, so its countdown ends. That it sprang shows
 -- only in its effect on the enemy: an aura. The aura is secret while combat
@@ -21,6 +23,10 @@
 -- resist or immunity of the trap's school, also tells that it sprang
 -- (OnCombat).
 --
+-- With both traps down, an aura that cannot be read may be either's. A fire
+-- trap that springs soon shows fire on the enemy as well, so the aura is
+-- taken for the frost trap's only if no fire follows (FIRE_WAIT).
+--
 -- The trap's effect itself is not shown: the user narrowed the addon to the
 -- armed trap's countdown (2026-10-04).
 -- /htt probe (Probe.lua) shows what the client lets through.
@@ -31,8 +37,15 @@ local Traps = {}
 ns.Traps = Traps
 
 Traps.ARMED_DURATION = 60
-Traps.TEST_DURATION = 15
 local TICK = 0.1
+
+-- The traps that can be down at once, one of each school, in the order their
+-- icons show.
+Traps.SLOTS = { "fire", "frost" }
+local SLOT_OF_SCHOOL = { [4] = "fire", [16] = "frost" }
+
+-- /htt test shows one trap of each school, running out at different times.
+Traps.TEST_DURATIONS = { fire = 20, frost = 15 }
 
 -- An aura found on an enemy belongs to the trap only if it was put there
 -- after the trap went down (this much earlier still counts, for rounding).
@@ -40,9 +53,20 @@ local LEEWAY = 0.5
 
 -- How long after a cast of the hunter's, the pet's or the group's an aura it
 -- puts on an enemy may still turn up (shots and spells fly), and after an
--- enemy's own cast an aura on it.
+-- enemy's own cast an aura on it. A trap that springs may put its aura on
+-- several enemies in that time too (Explosive Trap).
 local CAST_WINDOW = 1.5
 local ENEMY_CAST_WINDOW = 1
+
+-- How long a fire trap may take to show fire after its aura: Immolation
+-- Trap's first burn comes 3.1 to 3.2 seconds after it (/htt probe,
+-- 2026-10-04), Explosive Trap's at once.
+local FIRE_WAIT = 4
+
+-- Frost Trap leaves an ice slick for 30 seconds when it springs, and every
+-- enemy that walks onto it is slowed: an aura that is the slick's, not a new
+-- trap's.
+local FROST_SLICK = 30
 
 -- Spells of the hunter's and the pet's that put no aura on an enemy, so they
 -- explain none: attacks and shots that only deal damage (in the /htt probe
@@ -65,12 +89,14 @@ end
 -- Forever kept Classic's spell IDs (wowhead Forever and wow-forever.gg, build
 -- 1.60.1.70205). spells: the trap by rank; effects: the aura each rank puts on
 -- the enemy; school: the spell school of the effect (Fire 4, Frost 16), as
--- UNIT_COMBAT gives it; hurts: the effect deals damage (the fire traps; the
--- frost ones only freeze or slow).
+-- UNIT_COMBAT gives it; slot: the trap it replaces is the one in the same
+-- slot; hurts: the effect deals damage (the fire traps; the frost ones only
+-- freeze or slow); slick: it leaves Frost Trap's ice.
 Traps.LIST = {
     {
         key = "immolation",
         school = 4,
+        slot = "fire",
         hurts = true,
         spells = { 13795, 14302, 14303, 14304, 14305 },
         effects = { 13797, 14298, 14299, 14300, 14301 },
@@ -78,18 +104,22 @@ Traps.LIST = {
     {
         key = "freezing",
         school = 16,
+        slot = "frost",
         spells = { 1499, 14310, 14311 },
         effects = { 3355, 14308, 14309 },
     },
     {
         key = "frost",
         school = 16,
+        slot = "frost",
+        slick = true,
         spells = { 13809 },
         effects = { 13810 },
     },
     {
         key = "explosive",
         school = 4,
+        slot = "fire",
         hurts = true,
         spells = { 13813, 14316, 14317 },
         effects = { 13812, 14314, 14315 },
@@ -98,19 +128,30 @@ Traps.LIST = {
 
 local bySpell = {}  -- [spellID] = { trap = trap, rank = rank }
 local byName = {}   -- [spell name] = trap, for ranks the list lacks
+local byKey = {}    -- [key] = trap
+local testTraps = {} -- [slot] = the trap /htt test shows there
 for _, trap in ipairs(Traps.LIST) do
+    byKey[trap.key] = trap
+    testTraps[trap.slot] = testTraps[trap.slot] or trap
     for rank, spellID in ipairs(trap.spells) do
         bySpell[spellID] = { trap = trap, rank = rank }
     end
 end
 
--- Traps.armed is the trap that is down: { trap, rank, spellID, icon, start,
--- duration, warned, test } or nil. Traps.lastArmed is the last trap put down,
--- kept after it is gone.
+-- Traps.armed[slot] is the trap down in that slot: { trap, rank, spellID,
+-- icon, start, duration, warned, test }, or nil. Traps.lastArmed[slot] is the
+-- last trap put down there, kept after it is gone.
+Traps.armed = {}
+Traps.lastArmed = {}
 
 local lastOwnCast = -math.huge    -- GetTime() of the hunter's or the pet's last cast that may put an aura
 local lastGroupCast = -math.huge  -- of the last cast of another group member or their pet
 local enemyCastAt = {}            -- [unit] = GetTime() of that enemy's last cast
+local lastSprang = -math.huge     -- when the last trap sprang
+local slickUntil = -math.huge     -- until when Frost Trap's ice is down
+-- An aura that cannot be read, seen with both traps down: { at, unit, frost },
+-- the frost trap's unless fire follows within FIRE_WAIT.
+local pending
 
 -- The trap a spell puts down, and its rank (nil when only the name matched).
 function Traps.Find(spellID)
@@ -123,6 +164,15 @@ function Traps.Find(spellID)
     end
     local name = Plain(C_Spell.GetSpellName(spellID))
     return name and byName[name], nil
+end
+
+-- The traps down, in the order of Traps.SLOTS.
+function Traps.Armed()
+    local list = {}
+    for _, slot in ipairs(Traps.SLOTS) do
+        list[#list + 1] = Traps.armed[slot]
+    end
+    return list
 end
 
 -- Runs Traps.Update while a trap is down.
@@ -138,46 +188,64 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
 end)
 
 local function Changed()
-    ticker:SetShown(Traps.armed ~= nil)
+    ticker:SetShown(next(Traps.armed) ~= nil)
     ns.Display.Refresh()
 end
 
--- start: when it went down, now unless given (a trap taken back after /reload).
+-- Puts trap down in its slot, replacing the one there. start: when it went
+-- down, now unless given (a trap taken back after /reload). Returns its entry.
 function Traps.Arm(trap, rank, spellID, duration, start)
-    Traps.armed = {
+    local entry = {
         trap = trap, rank = rank, spellID = spellID,
         icon = Plain(C_Spell.GetSpellTexture(spellID)),
         start = start or GetTime(), duration = duration or Traps.ARMED_DURATION,
     }
-    Traps.lastArmed = Traps.armed
-    ns.Log("armed: %s (spell %d), %d s", trap.key, spellID, Traps.armed.duration)
+    Traps.armed[trap.slot] = entry
+    Traps.lastArmed[trap.slot] = entry
+    ns.Log("armed: %s (spell %d), %d s", trap.key, spellID, entry.duration)
     Changed()
+    return entry
 end
 
--- A test trap, to see the icon and the warning without a real one.
+-- Test traps, one of each school, to see the icons and the warning without
+-- real ones.
 function Traps.Test()
-    local trap = Traps.LIST[2]
-    Traps.Arm(trap, 1, trap.spells[1], Traps.TEST_DURATION)
-    Traps.armed.test = true
+    for _, slot in ipairs(Traps.SLOTS) do
+        local trap = testTraps[slot]
+        Traps.Arm(trap, 1, trap.spells[1], Traps.TEST_DURATIONS[slot]).test = true
+    end
 end
 
--- /htt clear: drops the countdown, should it ever go wrong (the trap was
+-- /htt clear: drops the countdowns, should they ever go wrong (a trap was
 -- taken for sprung too late, or not at all). Returns whether there was one.
 function Traps.Clear()
-    local armed = Traps.armed
-    if not armed then
+    local armed = Traps.Armed()
+    if #armed == 0 then
         return false
     end
-    ns.Log("cleared: %s", armed.trap.key)
-    Traps.armed = nil
+    for _, entry in ipairs(armed) do
+        ns.Log("cleared: %s", entry.trap.key)
+    end
+    wipe(Traps.armed)
+    pending = nil
     Changed()
     return true
 end
 
--- The armed trap sprang on unit (how it was told: why), so it is gone.
-local function Sprang(unit, why)
-    ns.Log("sprang (%s): %s on %s", why, Traps.armed.trap.key, unit)
-    Traps.armed = nil
+-- entry sprang on unit (how it was told: why) at the time at, now unless
+-- given, so it is gone.
+local function Sprang(entry, unit, why, at)
+    at = at or GetTime()
+    ns.Log("sprang (%s): %s on %s", why, entry.trap.key, unit)
+    Traps.armed[entry.trap.slot] = nil
+    lastSprang = at
+    if entry.trap.slot == "fire" then
+        -- The aura waiting to be told was the fire trap's.
+        pending = nil
+    end
+    if entry.trap.slick then
+        slickUntil = at + FROST_SLICK
+    end
     Changed()
 end
 
@@ -223,10 +291,11 @@ local function AddsHiddenAuras(info)
     return false
 end
 
--- An aura that cannot be read turned up on unit while the trap is down. It is
+-- An aura that cannot be read turned up on unit while a trap is down. It is
 -- taken for the trap's unless something else explains it: a cast just before
--- of the hunter's, the pet's or the group's (their spells put auras too), or
--- one of the enemy's own. Returns what explains it, or nil.
+-- of the hunter's, the pet's or the group's (their spells put auras too), one
+-- of the enemy's own, a trap that has just sprung, or Frost Trap's ice.
+-- Returns what explains it, or nil.
 local function Explained(unit)
     local now = GetTime()
     if now - lastOwnCast <= CAST_WINDOW then
@@ -235,27 +304,48 @@ local function Explained(unit)
         return "a group member's cast"
     elseif now - (enemyCastAt[unit] or -math.huge) <= ENEMY_CAST_WINDOW then
         return "its own cast"
+    elseif now - lastSprang <= CAST_WINDOW then
+        return "the trap that just sprang"
+    elseif now < slickUntil then
+        return "Frost Trap's ice"
     elseif Plain(UnitCanAttack("player", unit)) == false then
         return "not an enemy"
     end
 end
 
 function Traps.OnAura(unit, info)
-    local armed = Traps.armed
     unit = Plain(unit)
-    if not armed or armed.test or type(unit) ~= "string" or not IsWatched(unit) then
+    if type(unit) ~= "string" or not IsWatched(unit) then
         return
     end
-    local effectID = FindEffect(unit, armed.trap, armed.start)
-    if effectID then
-        Sprang(unit, "its effect " .. effectID)
-    elseif AddsHiddenAuras(info) then
-        local reason = Explained(unit)
-        if reason then
-            ns.Log("aura on %s not the trap's: %s", unit, reason)
-        else
-            Sprang(unit, "guessed from an aura")
+    local live = {}  -- the real traps down, test traps aside
+    for _, entry in ipairs(Traps.Armed()) do
+        if not entry.test then
+            live[#live + 1] = entry
         end
+    end
+    if #live == 0 then
+        return
+    end
+    local found = false
+    for _, entry in ipairs(live) do
+        local effectID = FindEffect(unit, entry.trap, entry.start)
+        if effectID then
+            Sprang(entry, unit, "its effect " .. effectID)
+            found = true
+        end
+    end
+    if found or not AddsHiddenAuras(info) then
+        return
+    end
+    local reason = Explained(unit)
+    if reason then
+        ns.Log("aura on %s not the trap's: %s", unit, reason)
+    elseif #live == 1 then
+        Sprang(live[1], unit, "guessed from an aura")
+    elseif not pending then
+        pending = { at = GetTime(), unit = unit, frost = Traps.armed.frost }
+        ns.Log("aura on %s: the frost trap's, unless fire follows", unit)
     end
 end
 
@@ -268,24 +358,24 @@ end
 
 -- UNIT_COMBAT (never secret): what an enemy took, and of which spell school.
 -- Fire or frost on an enemy while a trap of that school is down comes from
--- the trap (MayBeTrap): fire damage means a fire trap sprang, and a full
+-- the trap (MayBeTrap): fire damage means the fire trap sprang, and a full
 -- resist or an immunity that the trap sprang for nothing (Blizzard's
 -- CombatFeedback reads a resist as a WOUND of 0 with the RESIST flag).
 function Traps.OnCombat(unit, action, flags, amount, school)
-    local armed = Traps.armed
     unit = Plain(unit)
-    if not armed or armed.test or type(unit) ~= "string" or not IsWatched(unit) then
+    if type(unit) ~= "string" or not IsWatched(unit) then
         return
     end
     action, flags, amount, school = Plain(action), Plain(flags), Plain(amount), Plain(school)
-    if school ~= armed.trap.school or not MayBeTrap(unit) then
+    local entry = Traps.armed[SLOT_OF_SCHOOL[school] or ""]
+    if not entry or entry.test or not MayBeTrap(unit) then
         return
     elseif action == "IMMUNE" then
-        Sprang(unit, "immune")
+        Sprang(entry, unit, "immune")
     elseif action == "WOUND" and flags == "RESIST" and amount == 0 then
-        Sprang(unit, "resisted")
-    elseif action == "WOUND" and armed.trap.hurts and type(amount) == "number" and amount > 0 then
-        Sprang(unit, "fire damage")
+        Sprang(entry, unit, "resisted")
+    elseif action == "WOUND" and entry.trap.hurts and type(amount) == "number" and amount > 0 then
+        Sprang(entry, unit, "fire damage")
     end
 end
 
@@ -345,17 +435,26 @@ function Traps.OnSpellCast(unit, spellID)
     end
 end
 
--- Ends a trap that has run out and starts the warning.
+-- Ends the traps that have run out, starts their warnings, and tells an aura
+-- seen with both traps down: with no fire after it, the frost trap's.
 function Traps.Update()
-    local armed = Traps.armed
-    if armed then
-        local left = armed.start + armed.duration - GetTime()
+    local now = GetTime()
+    for _, entry in ipairs(Traps.Armed()) do
+        local left = entry.start + entry.duration - now
         if left <= 0 then
-            ns.Log("ran out: %s", armed.trap.key)
-            Traps.armed = nil
-        elseif not armed.warned and ns.db.warnSeconds > 0 and left <= ns.db.warnSeconds then
-            armed.warned = true
+            ns.Log("ran out: %s", entry.trap.key)
+            Traps.armed[entry.trap.slot] = nil
+        elseif not entry.warned and ns.db.warnSeconds > 0 and left <= ns.db.warnSeconds then
+            entry.warned = true
             ns.Display.Warn()
+        end
+    end
+    if pending and now - pending.at >= FIRE_WAIT then
+        local waited = pending
+        pending = nil
+        if Traps.armed.frost == waited.frost then
+            Sprang(waited.frost, waited.unit, "guessed from an aura with no fire after it", waited.at)
+            return
         end
     end
     Changed()
@@ -363,20 +462,22 @@ end
 
 -- /reload ---------------------------------------------------------------------
 
--- The trap stays in the world through a /reload, and GetTime() goes on, so the
--- armed trap is saved on the way out (PLAYER_LOGOUT) and taken back when the
--- interface comes back (PLAYER_ENTERING_WORLD with isReloadingUi). On a real
--- logout the trap goes with the character, so a login never takes it back.
+-- The traps stay in the world through a /reload, and GetTime() goes on, so
+-- the armed traps are saved on the way out (PLAYER_LOGOUT) and taken back when
+-- the interface comes back (PLAYER_ENTERING_WORLD with isReloadingUi). On a
+-- real logout the traps go with the character, so a login never takes them
+-- back.
 function Traps.Save()
-    local armed = Traps.armed
-    if armed and not armed.test then
-        ns.db.armed = {
-            key = armed.trap.key, rank = armed.rank, spellID = armed.spellID,
-            start = armed.start, duration = armed.duration, warned = armed.warned,
-        }
-    else
-        ns.db.armed = nil
+    local saved = {}
+    for _, entry in ipairs(Traps.Armed()) do
+        if not entry.test then
+            saved[#saved + 1] = {
+                key = entry.trap.key, rank = entry.rank, spellID = entry.spellID,
+                start = entry.start, duration = entry.duration, warned = entry.warned,
+            }
+        end
     end
+    ns.db.armed = #saved > 0 and saved or nil
 end
 
 function Traps.Restore(isReloadingUi)
@@ -385,17 +486,19 @@ function Traps.Restore(isReloadingUi)
     if not isReloadingUi or type(saved) ~= "table" then
         return
     end
-    local trap
-    for _, candidate in ipairs(Traps.LIST) do
-        if candidate.key == saved.key then
-            trap = candidate
-        end
+    -- Version 0.1 saved the one trap it knew.
+    if saved.key ~= nil then
+        saved = { saved }
     end
     local now = GetTime()
-    if trap and type(saved.spellID) == "number" and type(saved.start) == "number"
-        and type(saved.duration) == "number" and saved.start <= now and now < saved.start + saved.duration then
-        Traps.Arm(trap, type(saved.rank) == "number" and saved.rank or nil, saved.spellID, saved.duration, saved.start)
-        Traps.armed.warned = saved.warned == true
+    for _, one in ipairs(saved) do
+        local trap = type(one) == "table" and byKey[one.key]
+        if trap and type(one.spellID) == "number" and type(one.start) == "number"
+            and type(one.duration) == "number" and one.start <= now and now < one.start + one.duration then
+            local entry = Traps.Arm(trap, type(one.rank) == "number" and one.rank or nil, one.spellID, one.duration,
+                one.start)
+            entry.warned = one.warned == true
+        end
     end
 end
 

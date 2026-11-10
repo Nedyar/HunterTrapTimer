@@ -199,7 +199,7 @@ local function CreatePage()
         ns.Traps.Test()
     end)
     test:SetPoint("TOPLEFT", 20, -300)
-    SetTooltip(test, L["Test"], L["Shows a trap that runs out in 15 seconds."])
+    SetTooltip(test, L["Test"], L["Shows a fire trap and a frost trap that run out in 20 and 15 seconds."])
     local center = CreateButton(page, L["Reset position"], function()
         ns.db.position, ns.db.x, ns.db.y = ns.DEFAULTS.position, ns.DEFAULTS.x, ns.DEFAULTS.y
         ns.SettingsChanged()

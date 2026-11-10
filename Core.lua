@@ -1,4 +1,4 @@
--- Hunter Trap Timer: shows how long the hunter's trap stays armed.
+-- Hunter Trap Timer: shows how long the hunter's traps stay armed.
 -- Core.lua holds the settings, the shared helpers, the startup and the slash
 -- commands.
 local ADDON_NAME, ns = ...
@@ -200,7 +200,7 @@ SlashCmdList.HUNTERTRAPTIMER = function(message)
     else
         ns.Print(L["/htt - open the options"])
         ns.Print(L["/htt unlock, /htt lock - move the icon"])
-        ns.Print(L["/htt test - show a test trap"])
+        ns.Print(L["/htt test - show test traps"])
         ns.Print(L["/htt clear - clear the countdown, should it go wrong"])
         ns.Print(L["/htt reset - restore the default settings"])
     end

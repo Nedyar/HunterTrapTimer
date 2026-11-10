@@ -183,6 +183,11 @@ function Frame:SetScrollChild(child) self.scrollChild = child end
 -- Movable frames: the position is a center (x, y) in screen pixels.
 function Frame:SetMovable(movable) self.movable = movable end
 function Frame:SetClampedToScreen() end
+function Frame:SetClampRectInsets(l, r, t, b)
+    assert(type(l) == "number" and type(r) == "number" and type(t) == "number" and type(b) == "number",
+        "SetClampRectInsets takes four numbers")
+    self.clampInsets = { l, r, t, b }
+end
 function Frame:SetUserPlaced(placed) self.userPlaced = placed end
 function Frame:EnableMouse(enabled) self.mouse = enabled end
 function Frame:SetMouseMotionEnabled(enabled) self.mouseMotion = enabled end

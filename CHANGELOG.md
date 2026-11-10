@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- **A fire trap and a frost trap at once**: WoW Forever lets you have one of each down, so each gets its own icon, the frost trap's to the left of the fire trap's, under your level. A new trap replaces only the one of its own school. The icons sit a little lower than before, clear of the level circle.
+- **Each trap springs on its own**: with both down, an aura that could be either trap's is taken for the frost trap's unless fire follows within 4 seconds (Immolation Trap burns some 3 seconds after it springs). Enemies slowed on Frost Trap's ice, or burned by Explosive Trap, do not spring your other trap.
+- Each trap warns on its own, both survive a /reload, and `/htt clear` clears both.
+- `/htt test` shows a test trap of each school.
+
 ## 0.1.1
 
 - **The icon no longer covers your pet's frame**: by default it now sits under your portrait, clear of it.
