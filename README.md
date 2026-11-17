@@ -21,9 +21,22 @@ long your hunter traps stay armed before they vanish.
   icons square, put the seconds on them, resize them, or free them to be
   dragged anywhere.
 - **Warning before it runs out.** With 10 seconds left (adjustable, or off)
-  the seconds turn red, the icon flashes and a sound plays.
-- **Notices when a trap springs.** A trap that springs is gone, so its
-  icon goes, also when the enemy resists the trap or is immune to it.
+  the seconds turn red, the icon flashes and the trap's sound plays.
+- **Notices when a trap springs, however far away you are.** A trap that
+  springs is gone, so its icon goes, even with the enemy out of sight or
+  enemy nameplates off.
+- **How long its effect lasts.** Once a trap springs, its icon stays and
+  counts down its effect: Freezing Trap's freeze (the seconds in ice blue)
+  until the enemy breaks free; Immolation Trap's burn (in orange) until the
+  enemy it burns dies or you leave combat; Explosive Trap's fire (in orange)
+  and Frost Trap's ice (in ice blue) for the 20 and 30 seconds they stay on
+  the ground. Its seconds are rounded down, as the game's aura tooltips
+  round them (the armed trap's are rounded up, as a totem's). The countdown
+  can be turned off in the options.
+- **A sound for each trap.** On the options' Sounds page, each trap has its
+  own sound for the warning and one for when its effect ends, out of nine of
+  the game's sounds or none; choosing one plays it. By default the warnings
+  play the raid warning, and every effect's end the third alarm clock.
 - **Keeps the countdowns through a `/reload`.** The traps stay in the world
   when you reload the interface, and so do their countdowns.
 - **Every client language.** The texts are in English, German, Spanish (EU
@@ -64,32 +77,42 @@ puts you in combat at that very moment, so its effect can seldom be read
 (when it can, the addon uses it). These do come through:
 
 - **Casts.** Putting a trap down is always seen, so the 60 second countdown
-  is exact. Your group's spells are secret in combat, but that they cast is
-  not.
-- **That an enemy gained an aura**, though not which one. With a trap down,
-  an aura that nothing else explains is taken for the trap's:
-  something else explains it when you, your pet, or anyone in your group or
-  their pets cast a spell in the 1.5 seconds before (attacks that put no
-  aura excepted, such as Auto Shot, Raptor Strike, Arcane Shot or the pet's
-  Bite), or the enemy itself cast one in the second before. In a
-  group, an effect that comes with no spell, such as a rogue's poison, a
-  weapon's proc or a totem's attack, can now and then be taken for the trap.
-- **Damage, with its spell school.** It is never secret. Hunters and their
-  pets cast no fire or frost spell besides traps, so fire or frost on an
-  enemy while a trap of that school is down is the trap's, unless someone in
-  your group cast a spell just before: fire damage means a fire trap sprang,
-  and a full resist or an immunity that the trap sprang for nothing.
+  is exact.
+- **The trap's cooldown event.** When a trap goes, sprung or run out, the
+  game updates that trap spell's cooldown (`SPELL_UPDATE_COOLDOWN`, with the
+  trap's spell ID), in combat too and however far away you are. It does so
+  as the trap is cast as well, once for the global cooldown just before the
+  cast and once as the trap goes down: those are told apart by the cast
+  around them. One in the trap's last moment is the trap running out. The
+  spell ID says which trap it was, so with both traps down the right one
+  goes.
 
-With both traps down, an aura that cannot be read could be either trap's.
-A fire trap shows fire on the enemy soon after it springs (Explosive Trap's
-blast at once, Immolation Trap's first burn some 3 seconds later), so the
-aura is taken for the frost trap's only if no fire follows within 4 seconds.
-Auras just after a trap springs (Explosive Trap burns every enemy around),
-and on enemies slowed by Frost Trap's ice for the 30 seconds it lasts, are
-not taken for your other trap.
+Until version 0.2 the addon guessed instead, from auras turning up on
+enemies and fire or frost on them. That saw only enemies near you, and in a
+group could take a teammate's poison or proc for your trap.
 
-The trap's effect itself (the freeze, the burn) is not shown: the addon only
-times the armed trap.
+## How long its effect lasts
+
+Each effect lasts its rank's whole time unless the addon sees it end:
+
+- **Freezing Trap's freeze** (10, 15 or 20 seconds). While an enemy is
+  frozen in your Freezing Trap, you have an aura of your own (the combat text
+  shows "<Freezing Trap>", and "<Freezing Trap> fades" as the enemy breaks
+  free). Which aura is secret in combat, but the kind of combat text is not,
+  even with floating combat text off, so the freeze ends at the first aura of
+  yours that fades after it began. Another of your buffs fading meanwhile
+  ends it early, as the game does not tell them apart. The freeze counts as
+  having taken hold if, as the trap sprang, that aura came or the game
+  updated the cooldown of spell 1324500, as it does whenever a Freezing Trap
+  catches an enemy; an enemy immune to it gets no freeze.
+- **Immolation Trap's burn** (15 seconds). The enemy it burns is the one
+  you can see (your target, focus, mouseover, nameplates) that gained an
+  aura as the trap sprang; should several, all of them count. The burn is
+  over once every one of them is seen to die, or when you leave combat: a
+  burn keeps its enemy in combat with you while it lasts. A burn that is
+  dispelled cannot be told, so it runs its time out.
+- **Explosive Trap's fire** (20 seconds) **and Frost Trap's ice** (30) stay
+  on the ground their whole time, whoever dies.
 
 ## Files
 
@@ -119,9 +142,12 @@ lua5.1 Tests\run.lua [path to HunterTrapTimer]
 ```
 
 The path defaults to the folder that holds `Tests`. The tests put traps
-down, one or one of each school, and let them run out or spring, with auras
-that can be read, secret ones, and ones that a cast explains, and with
-resists and immune enemies;
+down, one or one of each school, and let them run out or spring, told by
+the game's cooldown events (sprung far away, after the cooldown, in the
+trap's last moment, around a new cast of it) or by an effect that can be
+read; then each trap's effect and its end (a freeze broken or run out, a
+burn's enemies dying or the hunter leaving combat, the fire's and the ice's time); each
+trap's sounds, chosen on the Sounds page;
 they cover the warning, a `/reload` and a new login, moving the icon, the
 options, the saved settings, the probe, and every client language, which must translate
 exactly the texts the code uses, with the same placeholders. They also fail

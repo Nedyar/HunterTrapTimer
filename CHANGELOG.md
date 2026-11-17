@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- **Notices every trap that springs, however far away you are**: the game tells addons when a trap goes, and which one, even when the enemy is out of sight, with enemy nameplates off, or in combat. A trap that sprang while you were away no longer keeps its countdown and its warning.
+- **No more guessing**: an aura or fire on an enemy no longer counts as your trap, so in a group a teammate's poison or proc is never taken for it, and with both traps down the right one goes at once.
+- **How long a trap's effect lasts**: once a trap springs, its icon stays and counts down its effect, however far away you are, its seconds rounded as the game's aura tooltips round them. Freezing Trap's freeze (seconds in ice blue) lasts until the enemy breaks free. Immolation Trap's burn (in orange) lasts until the enemy it burns is seen to die, or you leave combat. Explosive Trap's fire (in orange) and Frost Trap's ice (in ice blue) stay on the ground their 20 and 30 seconds. Another of your buffs fading during a freeze ends its countdown early, as the game does not tell them apart. The countdown can be turned off in the options.
+- **A sound of your choice for each trap**: on the new Sounds page of the options, each trap has a sound for the warning before it runs out and one for when its effect ends, out of nine of the game's sounds or none; choosing one plays it. By default the warnings keep the raid warning, and every effect's end plays the third alarm clock. If you had turned the warning's sound off, all the warnings stay silent.
+- `/htt probe` logs what the game tells of traps and freezes, and its window closes in combat too.
+
 ## 0.2.0
 
 - **A fire trap and a frost trap at once**: WoW Forever lets you have one of each down, so each gets its own icon, the frost trap's to the left of the fire trap's, under your level. A new trap replaces only the one of its own school. The icons sit a little lower than before, clear of the level circle.

@@ -265,26 +265,118 @@ check(NoTrap(), "it clears the test traps too")
 NoErrors("clearing")
 
 ---------------------------------------------------------------------------
--- The trap springs, so it is gone: its icon goes.
+-- The trap springs, so it is gone: its icon goes. As a trap goes, sprung or
+-- run out, the client fires SPELL_UPDATE_COOLDOWN with its spell ID, however
+-- far the hunter is (M.Spring); it fires it as the trap is cast too (M.Cast).
+-- The effects a trap shows once it sprang are set aside here, and tested
+-- after.
 ---------------------------------------------------------------------------
 M.AddUnit("nameplate1", { name = "Kobold" })
 M.AddUnit("nameplate2", { name = "Gnoll" })
 M.AddUnit("party1", { name = "Friend", friendly = true })
+ns.db.showEffects = false
+for _, sounds in pairs(ns.db.sounds) do
+    sounds.ended = "none"
+end
 
 local function Sprang(slot, message)
     eq(Key(slot), nil, message)
     check(not M.Visible(Icon(slot)), message .. ": its icon is gone")
 end
 
--- Its effect's aura, when it can be read.
-M.Cast(1499)
+M.Cast(13809)
+eq(Key("frost"), "frost", "the cast's own cooldown events leave the trap down")
 M.Advance(5)
 before = #M.sounds
-M.AddAura("nameplate1", 3355, 10)
-Sprang("frost", "the freeze's aura: the trap sprang")
+M.Spring(13809)
+eq(Key("frost"), "frost", "its cooldown event is told a moment later")
+M.Advance(0.5)
+Sprang("frost", "its cooldown event: the trap sprang")
 M.Advance(60)
 eq(#M.sounds, before, "no warning for a trap that sprang")
-M.RemoveAura("nameplate1", 3355)
+
+-- In combat, with no enemy in sight, and after its cooldown is over.
+M.combat, M.aurasSecret = true, true
+M.Cast(13813)
+M.Advance(35)
+M.Spring(13813)
+M.Advance(0.5)
+Sprang("fire", "a trap that springs after its cooldown, far away in combat")
+
+-- With both down, the event tells which trap sprang.
+M.Cast(13809)
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.Advance(0.5)
+Sprang("fire", "with both traps down, the fire trap's event springs it")
+eq(Key("frost"), "frost", "and not the frost trap")
+eq(IconShift("frost"), 0, "whose icon moves to the first place")
+M.Spring(13809)
+M.Advance(0.5)
+Sprang("frost", "then the frost trap's springs it")
+
+-- Events that are not the trap's going.
+M.Cast(13795)
+M.Fire("SPELL_UPDATE_COOLDOWN", 13795)
+M.Advance(0.375)
+M.Fire("SPELL_UPDATE_COOLDOWN", 13795)
+M.Advance(0.5)
+eq(Key("fire"), "immolation", "events just after its cast are the cast's own")
+M.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 13809)
+M.Fire("SPELL_UPDATE_COOLDOWN", 13809)
+M.Advance(0.5)
+eq(Key("frost"), "frost", "even with no UNIT_SPELLCAST_SENT before them")
+for _, other in ipairs({ 75, 1242139, 1324500, 13809, 13813, 14302 }) do
+    M.Fire("SPELL_UPDATE_COOLDOWN", other)
+end
+M.Fire("SPELL_UPDATE_COOLDOWN", SECRET)
+M.Fire("SPELL_UPDATE_COOLDOWN")
+M.Advance(0.5)
+eq(Key("fire"), "immolation", "another spell's event, another trap's or rank's, or a secret one, leave it down")
+-- Cast again once its cooldown is over: the new cast's global cooldown comes
+-- first. The trap stays though that cast fails...
+M.Advance(30)
+local first = ns.Traps.armed.fire
+M.Fire("SPELL_UPDATE_COOLDOWN", 13795)
+M.Fire("UNIT_SPELLCAST_SENT", "player", "", "Cast-1", 13795)
+M.Fire("UNIT_SPELLCAST_FAILED", "player", "Cast-1", 13795)
+M.Advance(0.5)
+eq(ns.Traps.armed.fire, first, "a new cast's global cooldown is not the trap's going, though that cast failed")
+-- ... and one that goes off replaces it.
+M.Cast(13795)
+M.Advance(0.5)
+check(ns.Traps.armed.fire ~= first, "a new cast that goes off replaces it")
+eq(IconText("fire"), 60, "counting from 60")
+-- In its last moment, the event is the trap running out.
+local notes = {}
+ns.Log = function(text, ...)
+    notes[#notes + 1] = text:format(...)
+end
+M.Advance(58.75)
+M.Spring(13795)
+M.Advance(0.5)
+eq(Key("fire"), nil, "the trap is gone")
+eq(notes[#notes], "ran out: immolation", "an event in its last moment is the trap running out")
+M.Cast(13809)
+M.Advance(60.125)
+eq(notes[#notes], "ran out: frost", "a trap runs out after 60 seconds")
+M.Spring(13809)
+M.Advance(0.5)
+eq(notes[#notes], "ran out: frost", "and its event after that changes nothing")
+ns.Log = function() end
+M.combat, M.aurasSecret = false, false
+NoErrors("with cooldown events")
+
+-- Its effect's aura, when it can be read, tells at once.
+M.Cast(13809)
+M.Advance(5)
+M.AddAura("nameplate1", 13810, 10)
+Sprang("frost", "Frost Trap's aura on an enemy: the trap sprang")
+M.Spring(13809)
+M.Advance(0.5)
+check(NoTrap(), "and its cooldown event after it changes nothing")
+M.RemoveAura("nameplate1", 13810)
 
 -- Auras that are not this trap's.
 M.Cast(1499)
@@ -304,12 +396,17 @@ M.AddAura("nameplate1", 13797, 15)
 check(Key("frost") ~= nil, "another trap's effect is not this trap's")
 M.RemoveAura("nameplate1", 13797)
 
--- Auras that cannot be read, listed as readable.
+-- Auras that cannot be read, listed as readable; and, the guesses gone, an
+-- aura that turns up on an enemy in combat says nothing.
 M.aurasSecret = true
 M.AddAura("nameplate1", 3355, 10)
 check(Key("frost") ~= nil, "an aura the lookup cannot find is not noticed")
 M.RemoveAura("nameplate1", 3355)
-M.aurasSecret = false
+M.combat = true
+M.HiddenAura("nameplate1")
+M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "RESIST", SECRET, 16)
+check(Key("frost") ~= nil, "nor an aura that cannot be read, or a frost resist")
+M.combat, M.aurasSecret = false, false
 M.Fire("UNIT_AURA", SECRET, SECRET)
 M.Fire("UNIT_AURA", "nameplate1", SECRET)
 check(Key("frost") ~= nil, "an update that cannot be read at all says nothing")
@@ -317,210 +414,337 @@ NoErrors("with secret auras")
 M.Advance(61)
 
 -- With both traps down, a readable aura tells which one sprang.
-M.Cast(1499)
+M.Cast(13809)
 M.Cast(13795)
-M.AddAura("nameplate1", 3355, 10)
-Sprang("frost", "with both traps down, the freeze's aura springs the frost trap")
+M.AddAura("nameplate1", 13810, 10)
+Sprang("frost", "with both traps down, Frost Trap's aura springs the frost trap")
 eq(Key("fire"), "immolation", "and not the fire trap")
-M.RemoveAura("nameplate1", 3355)
+M.RemoveAura("nameplate1", 13810)
 M.Advance(2)
-M.Cast(1499)
+M.Cast(13809)
 M.AddAura("nameplate2", 13797, 15)
 Sprang("fire", "the burn's aura springs the fire trap")
-eq(Key("frost"), "freezing", "and not the frost trap")
+eq(Key("frost"), "frost", "and not the frost trap")
 M.RemoveAura("nameplate2", 13797)
 M.Advance(61)
 
 ---------------------------------------------------------------------------
--- In combat the effect cannot be read: an aura that turns up on an enemy,
--- with nothing else to explain it, is taken for the trap's.
+-- A trap that sprang shows its effect while it lasts. A Freezing Trap that
+-- catches an enemy: its icon stays for the freeze, the seconds in ice blue,
+-- until the enemy breaks free, with a sound of its own.
 ---------------------------------------------------------------------------
+local ICE, FIRE = "0.5,0.8,1", "1,0.55,0.2"
+local BREAK = SOUNDKIT.ALARM_CLOCK_WARNING_3
+ns.db.showEffects = true
+for key, sounds in pairs(ns.db.sounds) do
+    sounds.ended = ns.DEFAULT_SOUNDS[key].ended
+end
 M.combat, M.aurasSecret = true, true
 M.Cast(1499)
-M.HiddenAura("nameplate1")
-Sprang("frost", "an unexplained aura on an enemy: the trap sprang")
-
--- Auras that something else explains.
-M.Cast(1499)
-M.Cast(13550)
-M.HiddenAura("nameplate1")
-check(Key("frost") ~= nil, "an aura right after the hunter's Serpent Sting is the sting's")
-M.Advance(1.5)
-M.HiddenAura("nameplate1")
-check(Key("frost") ~= nil, "still 1.5 seconds after it")
-M.Advance(0.125)
-M.Fire("UNIT_SPELLCAST_SUCCEEDED", "pet", "Cast-4", 26177)
-M.HiddenAura("nameplate1")
-check(Key("frost") ~= nil, "an aura right after the pet's Charge is the pet's")
-M.Advance(2)
-M.Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-5", SECRET)
-M.HiddenAura("nameplate1")
-check(Key("frost") ~= nil, "an aura right after the enemy's own cast is its own")
-M.Fire("UNIT_AURA", "nameplate1", { isFullUpdate = false, removedAuraInstanceIDs = SECRET })
-check(Key("frost") ~= nil, "an aura that goes is not the trap's")
-M.AddUnit("nameplate3", { name = "Guard", friendly = true })
-M.HiddenAura("nameplate3")
-check(Key("frost") ~= nil, "a friendly unit's aura is not the trap's")
-M.HiddenAura("party1")
-check(Key("frost") ~= nil, "nor a group member's")
-M.Advance(1.125)
-M.HiddenAura("nameplate2")
-Sprang("frost", "an aura nothing explains")
-
--- In a group, the group's casts explain auras too.
-M.inGroup = true
-M.Advance(1.625)
-M.Cast(1499)
-M.Fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "Cast-7", SECRET)
-M.HiddenAura("nameplate2")
-check(Key("frost") ~= nil, "an aura right after a group member's cast is theirs")
-M.Advance(1.625)
-M.Fire("UNIT_SPELLCAST_SUCCEEDED", "partypet1", "Cast-8", SECRET)
-M.HiddenAura("nameplate2")
-check(Key("frost") ~= nil, "and so is one right after their pet's")
-M.Advance(1.625)
-M.Fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "Cast-9", 75)
--- In a raid the hunter is a raid unit as well: their own casts are not the group's.
-M.AddUnit("raid3", { name = "Tester", isPlayer = true, friendly = true })
-M.Fire("UNIT_SPELLCAST_SUCCEEDED", "raid3", "Cast-10", 1499)
-M.HiddenAura("nameplate2")
-Sprang("frost", "in a group, an aura nothing explains")
-M.inGroup = false
-
--- Attacks that put no aura explain nothing, whatever their rank.
-for _, attack in ipairs({ { 75, "Auto Shot" }, { 14261, "Raptor Strike" }, { 3044, "Arcane Shot" },
-    { 14282, "Arcane Shot (higher rank)" } }) do
-    M.Advance(1.625)
-    M.Cast(1499)
-    M.Cast(attack[1])
-    M.HiddenAura("nameplate2")
-    Sprang("frost", attack[2] .. " explains nothing")
-end
-M.Advance(1.625)
-M.Cast(1499)
-M.Fire("UNIT_SPELLCAST_SUCCEEDED", "pet", "Cast-12", 17253)
-M.HiddenAura("nameplate2")
-Sprang("frost", "nor the pet's Bite")
-
--- Fire and frost: only traps bring them to a hunter's fight.
-M.Cast(13813)
-M.Fire("UNIT_COMBAT", "nameplate2", "WOUND", "", 120, 4)
-Sprang("fire", "fire damage: the fire trap sprang")
-M.Cast(13795)
-M.Cast(13550)
-M.HiddenAura("nameplate2")
 M.Advance(3)
-M.Fire("UNIT_COMBAT", "nameplate2", "WOUND", "", 21, 4)
-Sprang("fire", "Immolation Trap's first burn, after its aura was taken for the sting's")
+before = #M.sounds
+M.Spring(1499)
+M.Advance(0.5)
+eq(Key("frost"), nil, "the Freezing Trap sprang")
+check(M.Visible(Icon("frost")), "its icon stays for the freeze")
+eq(IconText("frost"), 9, "counting rank 1's 10 seconds, rounded down as the game's aura tooltips (9.5 left)")
+eq(IconColor("frost"), ICE, "in ice blue")
+icon = Icon("frost")
+eq(icon.texture.path, "icon:3355", "with the freeze's icon")
+eq(icon.sweep.duration, 10, "and its sweep")
+check(not icon.flash:IsPlaying(), "it does not flash")
+icon.scripts.OnEnter(icon)
+eq(table.concat(GameTooltip.lines, " / "), "Freezing Trap Effect / Enemy frozen / 9 |4second:seconds; remaining",
+    "its tooltip says the enemy is frozen")
+icon.scripts.OnLeave(icon)
+M.Advance(4)
+M.AuraFades(true)
+check(M.Visible(Icon("frost")), "a harmful aura fading on the hunter is not the freeze's end")
+eq(#M.sounds, before, "and plays nothing")
+M.AuraFades()
+check(not M.Visible(Icon("frost")), "the hunter's aura fades: the enemy broke free, the icon goes")
+eq(#M.sounds, before + 1, "a sound plays")
+eq(M.sounds[#M.sounds], BREAK, "its own, not the warning's")
+M.Advance(10)
+eq(#M.sounds, before + 1, "once")
+-- A client that will not play that sound plays the warning's.
+M.silentSounds[BREAK] = true
 M.Cast(1499)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "RESIST", 0, 16)
-Sprang("frost", "a frost resist: the trap sprang for nothing")
-M.Cast(13795)
-M.Fire("UNIT_COMBAT", "nameplate2", "IMMUNE", "", 0, 4)
-Sprang("fire", "an immune enemy, for a fire trap")
-M.Cast(1499)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "RESIST", 0, 64)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "RESIST", 0, 4)
-check(Key("frost") ~= nil, "a resist of another school is not the trap's")
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 80, 16)
-check(Key("frost") ~= nil, "frost damage never comes from a frost trap")
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 0, 1)
-M.Fire("UNIT_COMBAT", "nameplate1", "MISS", "", 0, 1)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 20, SECRET)
-check(Key("frost") ~= nil, "a miss, or a school that cannot be read, says nothing")
-M.inGroup = true
-M.Fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "Cast-6", SECRET)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "RESIST", 0, 16)
-check(Key("frost") ~= nil, "a frost resist right after a group member's spell is theirs")
-M.inGroup = false
-M.Advance(1.625)
-M.Fire("UNIT_COMBAT", "nameplate3", "WOUND", "RESIST", 0, 16)
-check(Key("frost") ~= nil, "a friendly unit's resist is not the trap's")
-M.Advance(61)
-NoErrors("while guessing")
-
----------------------------------------------------------------------------
--- Both traps down in combat: each springs on its own.
----------------------------------------------------------------------------
-M.Cast(1499)
-M.Cast(13795)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "RESIST", 0, 16)
-Sprang("frost", "a frost resist springs the frost trap")
-eq(Key("fire"), "immolation", "and leaves the fire trap")
-eq(IconShift("fire"), 0, "whose icon stays first")
-M.Cast(1499)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 40, 4)
-Sprang("fire", "fire damage springs the fire trap")
-eq(Key("frost"), "freezing", "and leaves the frost trap")
-eq(IconShift("frost"), 0, "whose icon moves to the first place")
-
--- An aura that cannot be read may be either trap's: the fire trap's if fire
--- follows, as Immolation Trap's first burn does some 3 seconds after...
 M.Advance(2)
-M.Cast(13795)
-M.HiddenAura("nameplate1")
-check(Key("fire") ~= nil and Key("frost") ~= nil, "an aura either trap may have put springs neither at once")
-M.Advance(3.125)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 21, 4)
-Sprang("fire", "the burn that follows tells it was the fire trap's")
+M.Spring(1499)
+M.Advance(0.5)
+M.AuraFades()
+eq(M.sounds[#M.sounds], SOUNDKIT.RAID_WARNING, "a client that will not play it plays the warning's sound instead")
+M.silentSounds[BREAK] = nil
+
+-- With no sign of its end, the freeze lasts its rank's whole time.
+M.Cast(14311)
 M.Advance(2)
-eq(Key("frost"), "freezing", "and the frost trap stays")
--- ... and the frost trap's if no fire comes within 4 seconds.
-M.Cast(13795)
-M.HiddenAura("nameplate2")
-M.Advance(3.875)
-check(Key("frost") ~= nil, "the frost trap waits for fire")
-M.HiddenAura("nameplate1")
+M.Spring(14311)
+M.Advance(0.5)
+eq(IconText("frost"), 19, "rank 3 freezes for 20 seconds")
+eq(Icon("frost").texture.path, "icon:14309", "with its rank's icon")
+M.Advance(19.375)
+check(M.Visible(Icon("frost")), "until its time is up")
+before = #M.sounds
 M.Advance(0.25)
-Sprang("frost", "with no fire after the aura, the frost trap sprang")
-eq(Key("fire"), "immolation", "and the fire trap stays")
-M.Advance(61)
+check(not M.Visible(Icon("frost")), "then the enemy broke free")
+eq(#M.sounds, before + 1, "with its sound")
+M.Cast(99001)
+M.Advance(2)
+M.Spring(99001)
+M.Advance(0.5)
+eq(IconText("frost"), 19, "a rank found by name freezes for the longest time")
+Slash("clear")
 
--- Explosive Trap burns every enemy around it: its auras are not the frost
--- trap's, whether they come before its blast or just after.
+-- The freeze took hold if, as the trap sprang, the hunter got an aura or
+-- spell 1324500's event came; with neither (an immune enemy), there is none.
 M.Cast(1499)
-M.Cast(13813)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 90, 4)
-Sprang("fire", "Explosive Trap's blast springs the fire trap")
-M.HiddenAura("nameplate1")
-M.HiddenAura("nameplate2")
-eq(Key("frost"), "freezing", "its burn on the enemies around, just after, is not the frost trap's")
-M.Advance(1.625)
-M.HiddenAura("nameplate2")
-Sprang("frost", "an aura later is the frost trap's again")
-M.Advance(61)
+M.Advance(2)
+M.Spring(1499, { aura = false })
+M.Advance(0.5)
+check(M.Visible(Icon("frost")), "spell 1324500's event alone tells the freeze took hold")
+Slash("clear")
 M.Cast(1499)
-M.Cast(13813)
-M.HiddenAura("nameplate1")
-M.HiddenAura("nameplate2")
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 90, 4)
-Sprang("fire", "the blast after the auras springs the fire trap")
-M.Advance(4.125)
-eq(Key("frost"), "freezing", "and the auras before it were the fire trap's too")
-M.Advance(61)
+M.Advance(2)
+M.Spring(1499, { hold = false })
+M.Advance(0.5)
+check(M.Visible(Icon("frost")), "and so does the hunter's aura alone")
+Slash("clear")
+M.Cast(1499)
+M.Advance(2)
+M.Fire("COMBAT_TEXT_UPDATE", "SPELL_AURA_START")
+M.Advance(1)
+M.Spring(1499, { aura = false, hold = false })
+M.Advance(0.5)
+Sprang("frost", "with no sign it took hold, or an aura a second before, no freeze")
+M.Cast(1499)
+M.Advance(59)
+M.Spring(1499)
+M.Advance(0.5)
+check(M.Visible(Icon("frost")), "with the signs it took hold, a spring in the trap's last moment freezes too")
+Slash("clear")
 
--- Frost Trap leaves ice for 30 seconds: enemies slowed on it do not spring
--- the fire trap. Fire still does.
-M.Cast(13795)
+-- A new frost trap shows over the freeze, which still ends with its sound.
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(0.5)
 M.Cast(13809)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "RESIST", 0, 16)
-Sprang("frost", "Frost Trap sprang")
-M.Advance(2)
-M.HiddenAura("nameplate2")
-eq(Key("fire"), "immolation", "an enemy slowed on its ice does not spring the fire trap")
-M.Advance(20)
-M.HiddenAura("nameplate1")
-eq(Key("fire"), "immolation", "for the 30 seconds the ice lasts")
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 21, 4)
-Sprang("fire", "but fire springs the fire trap")
-M.Advance(2)
-M.Cast(13795)
-M.Advance(6.125)
-M.HiddenAura("nameplate1")
-Sprang("fire", "once the ice is gone, an aura springs the fire trap again")
-M.Advance(61)
+eq(Key("frost"), "frost", "a new frost trap")
+eq(IconText("frost"), 60, "shows over the freeze")
+before = #M.sounds
+M.AuraFades()
+eq(#M.sounds, before + 1, "the freeze still ends with its sound")
+eq(Key("frost"), "frost", "and the new trap stays")
+Slash("clear")
+
+-- Read out of combat, the freeze lasts as long as its aura.
 M.combat, M.aurasSecret = false, false
-NoErrors("with both traps down")
+M.Cast(1499)
+M.Advance(2)
+M.AddAura("nameplate1", 3355, 8)
+eq(Key("frost"), nil, "the freeze's aura springs the trap at once")
+eq(IconText("frost"), 8, "and the freeze lasts as long as the aura")
+M.AuraFades()
+check(M.Visible(Icon("frost")), "an aura of the hunter's fading as it began is not its end")
+M.Spring(1499)
+M.Advance(0.5)
+eq(IconText("frost"), 7, "the trap's event after it changes nothing")
+M.Advance(7.75)
+check(not M.Visible(Icon("frost")), "then the enemy broke free")
+M.RemoveAura("nameplate1", 3355)
+
+-- Frost Trap's ice stays on the ground its 30 seconds, in combat or out.
+M.combat, M.aurasSecret = true, true
+M.Cast(13809)
+M.Advance(2)
+M.Spring(13809)
+M.Advance(0.5)
+eq(Key("frost"), nil, "Frost Trap sprang")
+eq(IconText("frost"), 29, "its ice shows for 30 seconds")
+eq(IconColor("frost"), ICE, "in ice blue")
+icon = Icon("frost")
+eq(icon.texture.path, "icon:13810", "with the ice's icon")
+icon.scripts.OnEnter(icon)
+eq(GameTooltip.lines[2], "Ice on the ground", "its tooltip says what it is")
+icon.scripts.OnLeave(icon)
+before = #M.sounds
+M.Fire("PLAYER_REGEN_ENABLED")
+M.AuraFades()
+check(M.Visible(Icon("frost")), "leaving combat, or an aura of yours fading, leaves the ice")
+M.Advance(29.25)
+check(M.Visible(Icon("frost")), "it stays its 30 seconds")
+M.Advance(0.375)
+check(not M.Visible(Icon("frost")), "and goes then")
+eq(#M.sounds, before + 1, "with its trap's sound")
+eq(M.sounds[#M.sounds], BREAK, "the third alarm clock by default")
+
+-- Immolation Trap's burn, on the enemies an aura turned up on as it sprang,
+-- lasts until they are all seen to die.
+M.AddUnit("target", { name = "Kobold", guid = M.units.nameplate1.guid })
+M.AddUnit("nameplate4", { name = "Guard", friendly = true })
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.HiddenAura("nameplate1")
+M.HiddenAura("target")
+M.HiddenAura("nameplate4")
+M.Advance(0.5)
+eq(Key("fire"), nil, "Immolation Trap sprang")
+eq(IconText("fire"), 14, "its burn shows for 15 seconds")
+eq(IconColor("fire"), FIRE, "in orange")
+icon = Icon("fire")
+eq(icon.texture.path, "icon:13797", "with the burn's icon")
+icon.scripts.OnEnter(icon)
+eq(GameTooltip.lines[2], "Burning", "its tooltip says what it is")
+icon.scripts.OnLeave(icon)
+eq(#ns.Traps.effects.fire.victims, 1, "on one enemy, seen as the target too, and not on a friend")
+M.Advance(3)
+M.HiddenAura("nameplate2")
+M.units.nameplate2.dead = true
+M.Fire("UNIT_HEALTH", "nameplate2")
+check(M.Visible(Icon("fire")), "another enemy that dies leaves the burn")
+before = #M.sounds
+M.units.nameplate1.dead, M.units.target.dead = true, true
+M.Fire("UNIT_HEALTH", "target")
+check(not M.Visible(Icon("fire")), "the enemy it burned died, seen as the target: the burn is over")
+eq(#M.sounds, before + 1, "with its trap's sound")
+eq(M.sounds[#M.sounds], BREAK, "the third alarm clock by default")
+M.units.nameplate1.dead, M.units.nameplate2.dead, M.units.target.dead = false, false, false
+-- An enemy's nameplate goes as it dies, or as it goes out of sight.
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.HiddenAura("nameplate1")
+M.Advance(0.5)
+M.Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+check(M.Visible(Icon("fire")), "its nameplate going out of sight leaves the burn")
+M.units.nameplate1.dead = true
+M.Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+check(not M.Visible(Icon("fire")), "its nameplate going as it died ends it")
+M.units.nameplate1.dead = false
+-- Every enemy an aura turned up on as it sprang counts, and must die; one
+-- whose GUID is secret is told by its unit.
+M.units.nameplate2.secretGUID = true
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.HiddenAura("nameplate1")
+M.HiddenAura("nameplate2")
+M.Advance(0.5)
+eq(#ns.Traps.effects.fire.victims, 2, "every enemy an aura turned up on as it sprang counts")
+M.units.nameplate1.dead = true
+M.Fire("UNIT_HEALTH", "nameplate1")
+check(M.Visible(Icon("fire")), "one of them dying leaves the burn")
+M.units.nameplate2.dead = true
+M.Fire("UNIT_HEALTH", "nameplate2")
+check(not M.Visible(Icon("fire")), "both dead, it is over, the one with a secret GUID told by its unit")
+M.units.nameplate1.dead, M.units.nameplate2.dead, M.units.nameplate2.secretGUID = false, false, nil
+
+-- Explosive Trap's fire stays on the ground its 20 seconds, whoever dies.
+M.Cast(13813)
+M.Advance(2)
+M.Spring(13813)
+M.HiddenAura("nameplate1")
+M.Advance(0.5)
+eq(IconText("fire"), 19, "Explosive Trap's fire shows for 20 seconds (19.5 left, rounded down)")
+eq(IconColor("fire"), FIRE, "in orange")
+icon = Icon("fire")
+eq(icon.texture.path, "icon:13812", "with the fire's icon")
+icon.scripts.OnEnter(icon)
+eq(GameTooltip.lines[2], "Fire on the ground", "its tooltip says what it is")
+icon.scripts.OnLeave(icon)
+eq(ns.Traps.effects.fire.victims, nil, "it keeps no enemies")
+M.units.nameplate1.dead = true
+M.Fire("UNIT_HEALTH", "nameplate1")
+M.Fire("PLAYER_REGEN_ENABLED")
+check(M.Visible(Icon("fire")), "an enemy dying, or leaving combat, leaves the fire")
+M.units.nameplate1.dead = false
+M.Advance(19.25)
+check(M.Visible(Icon("fire")), "it stays its 20 seconds")
+M.Advance(0.375)
+check(not M.Visible(Icon("fire")), "and goes then")
+-- With no enemy seen, it lasts until you leave combat, or its time is up.
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.Advance(0.5)
+eq(#ns.Traps.effects.fire.victims, 0, "a burn far away has no enemy seen")
+M.Advance(5)
+check(M.Visible(Icon("fire")), "it lasts")
+M.Fire("PLAYER_REGEN_ENABLED")
+check(not M.Visible(Icon("fire")), "until you leave combat")
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.Advance(14.75)
+check(M.Visible(Icon("fire")), "else it lasts its 15 seconds")
+M.Advance(0.375)
+check(not M.Visible(Icon("fire")), "and no more")
+-- Read out of combat, a burn lasts as long as its aura.
+M.combat, M.aurasSecret = false, false
+M.Cast(13795)
+M.Advance(2)
+M.AddAura("nameplate1", 13797, 12)
+eq(IconText("fire"), 12, "read out of combat, the burn lasts as long as its aura")
+eq(#ns.Traps.effects.fire.victims, 1, "on the enemy it is on")
+M.RemoveAura("nameplate1", 13797)
+Slash("clear")
+
+-- The options: effects not shown, and no sound.
+M.combat, M.aurasSecret = true, true
+ns.db.showEffects = false
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(0.5)
+Sprang("frost", "with effects not shown, the trap's icon goes")
+before = #M.sounds
+M.Advance(10)
+eq(#M.sounds, before + 1, "the sound still plays as the enemy breaks free")
+ns.db.sounds.immolation.ended = "none"
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.Advance(0.5)
+eq(ns.Traps.effects.fire, nil, "and a burn with no sound for its end is not kept")
+ns.db.sounds.immolation.ended = "alarm2"
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.Advance(0.5)
+check(ns.Traps.effects.fire ~= nil and not M.Visible(Icon("fire")), "one with a sound for its end is, though not shown")
+M.Fire("PLAYER_REGEN_ENABLED")
+eq(M.sounds[#M.sounds], SOUNDKIT.ALARM_CLOCK_WARNING_2, "and its end plays its trap's sound")
+ns.db.sounds.immolation.ended = "alarm3"
+ns.db.sounds.freezing.ended = "none"
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(0.5)
+eq(ns.Traps.effects.frost, nil, "with neither, no freeze is kept")
+ns.db.showEffects = true
+before = #M.sounds
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(0.5)
+check(M.Visible(Icon("frost")), "the freeze shown with no sound")
+M.Advance(10)
+eq(#M.sounds, before, "breaks free silently")
+ns.db.sounds.freezing.ended = "alarm3"
+
+-- /htt clear clears a freeze too.
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(0.5)
+Slash("clear")
+check(ns.Traps.effects.frost == nil and not M.Visible(Icon("frost")), "/htt clear clears the freeze too")
+eq(M.printed[#M.printed], "|cffabd473Hunter Trap Timer|r: countdown cleared.", "and says so")
+M.combat, M.aurasSecret = false, false
+NoErrors("with freezes")
 
 ---------------------------------------------------------------------------
 -- The test traps, moving the icons, and the options.
@@ -591,6 +815,52 @@ check(not HunterTrapTimerFrame.mouseClick and not HunterTrapTimerFrame.mouseMoti
 
 local boxes, sliders = Frames("CheckButton", "UICheckButtonTemplate"), Frames("Slider")
 eq(#boxes, 3, "three checkboxes")
+eq(boxes[3].Text.textValue, "Show how long its effect lasts", "the effects' checkbox")
+boxes[3]:SetChecked(false)
+boxes[3]:Click()
+eq(ns.db.showEffects, false, "is bound to its setting")
+boxes[3]:SetChecked(true)
+boxes[3]:Click()
+eq(ns.db.showEffects, true, "and turns it back on")
+
+-- The sounds page, under the options: each trap's two sounds.
+eq(#M.subcategories, 1, "the options have a page under them")
+local soundsPage = M.subcategories[1]
+eq(soundsPage.name, "Sounds", "for the sounds")
+local dropdowns = {}
+for _, f in ipairs(Frames("DropdownButton", "WowStyle1DropdownTemplate")) do
+    if f.parent == soundsPage.frame then
+        dropdowns[#dropdowns + 1] = f
+    end
+end
+eq(#dropdowns, 8, "two dropdowns for each of the four traps")
+local rowNames = {}
+for _, region in ipairs(soundsPage.frame.regions) do
+    if region.kind == "FontString" and region.points and region.points[1][2] == 20 then
+        rowNames[#rowNames + 1] = region.textValue
+    end
+end
+eq(table.concat(rowNames, ", "), "Immolation Trap, Explosive Trap, Freezing Trap, Frost Trap",
+    "the traps by school, by the client's names")
+-- The rows go Immolation, Explosive, Freezing, Frost; each the warning's,
+-- then its effect's end.
+local immolationWarn, freezingWarn, freezingEnded = dropdowns[1], dropdowns[5], dropdowns[6]
+eq(immolationWarn.selectedText, "Raid warning", "a warning sounds the raid warning by default")
+eq(freezingEnded.selectedText, "Alarm clock 3", "an effect's end the third alarm clock")
+eq(dropdowns[2].selectedText, "Alarm clock 3", "every trap's")
+local names = {}
+for _, entry in ipairs(immolationWarn.menu) do
+    names[#names + 1] = entry.text
+end
+eq(table.concat(names, ", "), "None, Raid warning, Boss emote, Boss whisper, Ready check, Alarm clock 1, Alarm clock 2,"
+    .. " Alarm clock 3, Whisper, Notification", "the sounds to choose from")
+before = #M.sounds
+M.Pick(freezingWarn, "Alarm clock 3")
+eq(ns.db.sounds.freezing.warn, "alarm3", "choosing a sound sets it")
+eq(M.sounds[#M.sounds], SOUNDKIT.ALARM_CLOCK_WARNING_3, "and plays it, to hear it")
+eq(freezingWarn.selectedText, "Alarm clock 3", "the dropdown shows it")
+M.Pick(immolationWarn, "None")
+eq(#M.sounds, before + 1, "none plays nothing")
 eq(#sliders, 2, "two sliders")
 boxes[1]:SetChecked(false)
 boxes[1]:Click()
@@ -626,13 +896,12 @@ check(not Icon("frost").flash:IsPlaying(), "no flash")
 M.Advance(2)
 
 sliders[2]:SetValue(10, true)
-boxes[3]:SetChecked(false)
-boxes[3]:Click()
-eq(ns.db.warnSound, false, "the sound checkbox")
 M.Cast(1499)
+M.Cast(13795)
 M.Advance(51)
-eq(#M.sounds, before, "no sound when it is off")
-check(Icon("frost").flash:IsPlaying(), "but the icon flashes")
+eq(#M.sounds, before + 1, "each trap warns with its own sound: Freezing Trap's")
+eq(M.sounds[#M.sounds], SOUNDKIT.ALARM_CLOCK_WARNING_3, "the one chosen for it")
+check(Icon("fire").flash:IsPlaying(), "and Immolation Trap, with none, only flashes")
 boxes[2]:SetChecked(false)
 boxes[2]:Click()
 M.Advance(1)
@@ -644,9 +913,14 @@ check(ns.Traps.armed.frost and ns.Traps.armed.frost.test and ns.Traps.armed.fire
 M.Advance(21)
 
 Slash("reset")
-eq(ns.db.warnSound, true, "/htt reset restores the defaults")
+eq(ns.db.sounds.freezing.warn .. " " .. ns.db.sounds.immolation.warn, "raidWarning raidWarning",
+    "/htt reset restores the defaults")
 eq(ns.db.iconSize, 37, "including the size")
 eq(sliders[1].value, 37, "and the options show it")
+eq(freezingWarn.selectedText, "Raid warning", "the sounds too")
+ns.db.sounds.freezing.warn = "toast"
+eq(ns.DEFAULT_SOUNDS.freezing.warn, "raidWarning", "the defaults stay as they were")
+Slash("reset")
 
 -- By default the icon is a totem's: round, in a ring, the seconds below it,
 -- under the player frame.
@@ -766,12 +1040,19 @@ check(ProbeListens(), "/htt probe log starts recording")
 check(M.printed[before + 1]:find("probe recording", 1, true) ~= nil, "and says so")
 M.AddUnit("target", { name = "Kobold", auras = {} })
 M.Cast(1499)
+-- Blizzard's nameplate, already showing the freeze among crowd control.
+M.Plate("nameplate1", 0, 1, nil)
 M.AddAura("nameplate1", 3355, 10)
-M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 25, 16)
+M.Fire("UNIT_COMBAT", "nameplate1", "WOUND", "", SECRET, 16)
 M.Fire("UNIT_AURA", "nameplate1", SECRET)
 M.Fire("UNIT_AURA", "nameplate1", SECRET)
 M.Fire("UNIT_AURA", "nameplate1", SECRET)
 M.Fire("SPELL_UPDATE_COOLDOWN", 1499)
+M.Fire("SPELL_UPDATE_COOLDOWN", 1324500, 1324500, 0, 0)
+M.AddUnit("player", { name = "Hunter", auras = { { spellId = 1324500, sourceUnit = "player", isFromPlayerOrPlayerPet = true,
+    duration = 10, expirationTime = GetTime() + 10 } } })
+M.Fire("UNIT_AURA", "player", { addedAuras = { SECRET } })
+M.Fire("COMBAT_TEXT_UPDATE", "SPELL_AURA_START")
 M.Fire("PLAYER_TOTEM_UPDATE", 1)
 M.Fire("NAME_PLATE_UNIT_REMOVED", "nameplate2")
 M.Cast(1499)
@@ -780,11 +1061,16 @@ M.HiddenAura("nameplate2")
 M.Advance(1.625)
 M.HiddenAura("nameplate2")
 M.Advance(1.625)
+M.Spring(1499)
+M.Advance(0.5)
 M.Cast(13795)
 M.Cast(1499)
 M.HiddenAura("nameplate2")
 local text = ProbeText()
 check(HunterTrapTimerProbe:IsShown(), "/htt probe opens its window")
+check(HunterTrapTimerProbe.onCloseCallback() == false and not HunterTrapTimerProbe:IsShown(),
+    "its close button hides it itself (HideUIPanel will not in combat)")
+ProbeText()
 check(Has(text, "Hunter Trap Timer " .. C_AddOns.GetAddOnMetadata("HunterTrapTimer", "Version") .. " - probe"),
     "the report's title")
 check(Has(text, "Combat log restricted: true"), "the combat log answer")
@@ -798,21 +1084,36 @@ check(Has(text, "UNIT_SPELLCAST_SUCCEEDED player: 1499 Freezing Trap"), "the cas
 check(Has(text, "addon: armed: freezing (spell 1499), 60 s"), "the addon's own notes")
 check(Has(text, "UNIT_AURA nameplate1 (Kobold): added: 3355 Freezing Trap Effect, from player, by a player true"), "the aura is logged")
 check(Has(text, "UNIT_SPELLCAST_SUCCEEDED party1 (Friend): secret"), "the group's casts are logged")
-check(Has(text, "addon: aura on nameplate2 not the trap's: a group member's cast"), "and why an aura was not the trap's")
-check(Has(text, "addon: sprang (guessed from an aura): freezing on nameplate2"), "and a guess")
-check(Has(text, "addon: sprang (its effect 3355): freezing on nameplate1"), "the spring is logged")
-check(Has(text, "addon: aura on nameplate2: the frost trap's, unless fire follows"), "and an aura either trap may have put")
-check(Has(text, "UNIT_COMBAT nameplate1 (Kobold): WOUND  25, school 16"), "damage is logged")
+check(Has(text, "addon: sprang (its effect 3355 on nameplate1): freezing"), "a spring told by its effect is logged")
+check(Has(text, "addon: sprang (its cooldown event): freezing"), "and one told by its cooldown event")
+check(Has(text, "addon: freeze: 10.0 s"), "and the freeze")
+check(Has(text, "Effects: fire: none; frost: freeze, 9.5 s left."), "the report tells the effects")
+check(Has(text, "UNIT_COMBAT nameplate1 (Kobold): WOUND  secret, school 16"), "damage is logged, its amount secret")
+local _, plateLines = text:gsub("plate nameplate1 %(Kobold%): yours 0, crowd control 1, buffs hidden", "")
+eq(plateLines, 1, "the icons on Blizzard's nameplate are logged a moment after an aura, once while they stay the same")
+check(Has(text, "plate nameplate2 (Gnoll): no nameplate"), "and so is a unit with no nameplate")
+check(Has(text, "effect 3355 Freezing Trap Effect: 1, false, true;"), "whether a trap's effect is crowd control")
+check(Has(text, "Nameplate auras: enemy lists (nameplateEnemyNpcAuraDisplay) debuffs true, crowd control true, buffs true;"
+    .. " all your debuffs 0 (nameplateShowAllPersonalAuras); the target's nameplate: no nameplate."), "the nameplate settings, bit by bit")
+check(not Has(text, "Note: the window refused"), "the whole report goes in")
+M.Plate("target", 2, 0, 1)
+check(Has(ProbeText(), "the target's nameplate: yours 2, crowd control 0, buffs 1."), "and the target's icons")
+M.plates.target = nil
 check(Has(text, "payload secret; trap effects: 3355 found") and Has(text, "(x3)"), "repeats fold into one line")
-check(Has(text, "SPELL_UPDATE_COOLDOWN 1499; trap 1499: enabled true"), "cooldowns are logged")
+check(Has(text, "SPELL_UPDATE_COOLDOWN 1499 Freezing Trap (base nil, category nil, recovery category nil); trap 1499: enabled true"),
+    "cooldowns are logged")
+check(Has(text, "SPELL_UPDATE_COOLDOWN 1324500 nil (base 1324500, category 0, recovery category 0); trap 1499:"),
+    "with all the event says")
+check(Has(text, "UNIT_AURA player: added: secret aura; 1324500 nil on you: found, from player, by a player true, duration 10, 10.0 s left"),
+    "the hunter's own auras, and the one that may come with a freeze")
+check(Has(text, "COMBAT_TEXT_UPDATE SPELL_AURA_START: secret"), "the combat text's type")
 check(Has(text, "PLAYER_TOTEM_UPDATE 1: false, , 0, 0, 0"), "totems are logged")
 check(Has(text, "NAME_PLATE_UNIT_REMOVED nameplate2 (Gnoll): dead false"), "nameplates going are logged")
 check(Has(text, "Target: Kobold; yours: none; yours cc: none; its harmful auras:\n  none"), "the target's auras")
 check(Has(text, "yours cc: " .. M.lastInstanceID .. " (cc filtered out false, duration table)"),
     "the hunter's crowd control on an enemy, by instance ID")
-M.Advance(4.125)
-check(Has(ProbeText(), "addon: sprang (guessed from an aura with no fire after it): freezing on nameplate2"),
-    "and what it was taken for")
+M.Advance(10)
+check(Has(ProbeText(), "addon: freeze over (its time is up)"), "and its end")
 
 M.combat, M.aurasSecret = true, true
 M.units.target.auras = { { spellId = 3355 } }
@@ -848,6 +1149,51 @@ check(Has(text, "recording stopped") and not Has(text, "still recording"), "the 
 check(not ProbeListens(), "and the probe listens to nothing again")
 M.Cast(1499)
 check(not Has(ProbeText(), "armed: freezing"), "nothing more is logged")
+
+-- An edit box that takes no text past some length: the oldest log lines are
+-- left out until the report goes in.
+Slash("probe log")
+for _ = 1, 30 do
+    M.Cast(1499)
+    M.Advance(1)
+end
+Slash("probe log")
+local whole = ProbeText()
+local printedBefore = #M.printed
+M.editBoxLimit = #whole - 200
+text = ProbeText()
+check(text ~= "" and #text <= M.editBoxLimit, "a report too long for the window is cut to fit")
+check(Has(text, "left out: the window would not take them all)"), "leaving out the oldest log lines")
+local note = ("the window refused the whole report (%d bytes) with no error; it takes its first %d bytes, ending \"%s\", before \"%s\"; %d bytes of plain x it refuses too; a two-line text it takes")
+    :format(#whole, #whole - 200, whole:sub(#whole - 239, #whole - 200):gsub("\n", "\\10"),
+        (whole:sub(#whole - 199, #whole - 190):gsub("\n", "\\10")), #whole - 199)
+check(Has(text, "\nNote: " .. note .. "; 0 lines it refused on their own are shown escaped.\n"), "and says why, under the title")
+check(Has(text, "Hunter Trap Timer ") and Has(text, "recording stopped"), "keeping the report's head and the newest lines")
+eq(M.printed[printedBefore + 1], "|cffabd473Hunter Trap Timer|r: probe: " .. note .. "; it refused 0 lines on their own; the report then went in.",
+    "and in the chat")
+M.editBoxLimit = 10
+eq(ProbeText(), "", "a window that takes nothing does not hang the probe")
+check(Has(M.printed[#M.printed], "it still took none of the report."), "and says so")
+M.editBoxLimit = nil
+
+-- A line the window will not take is shown escaped (| and other bytes as
+-- \ddd), and the rest goes in whole.
+M.AddUnit("target", { name = "K\195\179bold|x", auras = {} })
+M.editBoxRefuses = "|x"
+text = ProbeText()
+check(Has(text, "\n[refused: Target: K\\195\\179bold\\124x; yours: "), "a line the window refuses is marked, its other bytes and | as \\ddd")
+check(Has(text, "Target: K\\195\\179bold\\124\", before \"x; yours: \"; ") and Has(text, "bytes of plain x it takes;"),
+    "the note shows the refused byte that stops it")
+check(Has(text, "1 lines it refused on their own are shown escaped") and Has(text, "recording stopped")
+    and not Has(text, "left out:"), "and the rest goes in, the whole log too")
+check(Has(M.printed[#M.printed], "it refused 1 lines on their own, the first: [refused: Target: K\\195\\179bold"),
+    "the chat says which")
+M.editBoxRefuses = nil
+M.AddUnit("target", { name = "Ko\2bold", auras = {} })
+text = ProbeText()
+check(Has(text, "Target: Ko\\2bold; yours: ") and not Has(text, "Note: the window refused"),
+    "a value's control bytes are shown as \\ddd, so the window takes the report")
+M.AddUnit("target", { name = "Kobold", auras = {} })
 M.Advance(61)
 NoErrors("at the end of session 1")
 
@@ -864,7 +1210,20 @@ eq(ns.db.y, 4000, "a far y is brought back")
 eq(ns.db.locked, true, "a bad lock is replaced")
 eq(ns.db.showEffect, nil, "the old effect setting is dropped")
 eq(ns.db.warnFlash, false, "good settings are kept")
-eq(ns.db.version, 2, "the version is set")
+eq(ns.db.version, 3, "the version is set")
+ns = NewSession({ saved = { version = 3, sounds = { freezing = { warn = "alarm1", ended = "loud" }, frost = "x",
+    explosive = { ended = 7 } } } })
+eq(ns.db.sounds.freezing.warn .. " " .. ns.db.sounds.freezing.ended, "alarm1 alarm3",
+    "a trap's good sound is kept, an unknown one replaced")
+eq(ns.db.sounds.frost.warn .. " " .. ns.db.sounds.explosive.ended .. " " .. ns.db.sounds.immolation.warn,
+    "raidWarning alarm3 raidWarning", "bad or missing traps get the defaults")
+-- Up to version 2 one checkbox turned every warning's sound on or off.
+ns = NewSession({ saved = { version = 2, warnSound = false } })
+eq(ns.db.sounds.immolation.warn .. " " .. ns.db.sounds.frost.warn, "none none", "warnings without sound stay so")
+eq(ns.db.sounds.freezing.ended, "alarm3", "an effect's end still sounds")
+eq(ns.db.warnSound, nil, "the old setting is dropped")
+ns = NewSession({ saved = { version = 2, warnSound = true } })
+eq(ns.db.sounds.immolation.warn, "raidWarning", "warnings with sound keep the raid warning")
 ns = NewSession({ saved = { iconSize = 0 / 0 } })
 eq(ns.db.iconSize, 37, "NaN is replaced")
 ns = NewSession({ saved = { position = "left", shape = "star", seconds = 3 } })

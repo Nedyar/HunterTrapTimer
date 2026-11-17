@@ -4,7 +4,7 @@
 -- spells the player knows, and what the addon printed and played.
 M = {
     printed = {}, errors = {}, sounds = {}, time = 1000, timers = {}, combat = false,
-    units = {}, eventFrames = {}, allFrames = {}, known = {},
+    units = {}, eventFrames = {}, allFrames = {}, known = {}, subcategories = {},
     aurasSecret = false,   -- C_Secrets says auras are secret now (combat restrictions)
 }
 
@@ -37,7 +37,7 @@ local KNOWN_EVENTS = {}
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "UNIT_AURA", "UNIT_COMBAT", "SPELL_UPDATE_COOLDOWN",
     "PLAYER_TOTEM_UPDATE", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "UNIT_SPELLCAST_SENT",
     "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED",
-    "NAME_PLATE_UNIT_REMOVED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT" }) do
+    "NAME_PLATE_UNIT_REMOVED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", "COMBAT_TEXT_UPDATE", "UNIT_HEALTH" }) do
     KNOWN_EVENTS[e] = true
 end
 -- Registering these is forbidden on Forever; the addon must never try.
@@ -104,8 +104,11 @@ end
 function Texture:IsMasked() return self.masks ~= nil and next(self.masks) ~= nil end
 
 local FontStringMeta, TextureMeta = Strict(FontString, "FontString"), Strict(Texture, "Texture")
+-- A frame keeps its regions in order (parent.regions), for the tests.
 local function NewRegion(kind, parent)
     local r = { kind = kind, parent = parent, shown = true }
+    parent.regions = parent.regions or {}
+    parent.regions[#parent.regions + 1] = r
     return setmetatable(r, kind == "FontString" and FontStringMeta or TextureMeta)
 end
 
@@ -144,6 +147,13 @@ function Frame:UnregisterEvent(event) if M.eventFrames[self] then M.eventFrames[
 function Frame:UnregisterAllEvents() M.eventFrames[self] = nil; self.unitFilter = nil end
 function Frame:SetFrameLevel(l) assert(type(l) == "number" and l >= 0 and l <= 10000, "bad frame level") self.level = l end
 function Frame:GetFrameLevel() return self.level or 1 end
+function Frame:GetChildren()
+    local children = {}
+    for _, f in ipairs(M.allFrames) do
+        if f.parent == self then children[#children + 1] = f end
+    end
+    return unpack(children)
+end
 function Frame:CreateFontString(name, layer, template) return NewRegion("FontString", self) end
 function Frame:CreateTexture(name, layer) return NewRegion("Texture", self) end
 function Frame:CreateMaskTexture() return NewRegion("MaskTexture", self) end
@@ -151,7 +161,17 @@ function Frame:CreateAnimationGroup() return setmetatable({}, AnimationGroupMeta
 function Frame:SetHitRectInsets(l, r, t, b) assert(type(r) == "number") end
 function Frame:EnableMouseWheel() end
 function Frame:Click() local s = self.scripts.OnClick if s then s(self, "LeftButton") end end
-function Frame:SetText(t) self.textValue = t end
+-- Build 70938's edit box took none of the probe's report, with no error: it
+-- held a control byte (a CVar's "\2G"). So does this one, and the tests also
+-- make it refuse a text longer than M.editBoxLimit or holding
+-- M.editBoxRefuses, to see the probe cope.
+function Frame:SetText(t)
+    if self.kind == "EditBox" and (t:find("[%z\1-\9\11-\31\127]") or M.editBoxLimit and #t > M.editBoxLimit
+        or M.editBoxRefuses and t:find(M.editBoxRefuses, 1, true)) then
+        t = ""
+    end
+    self.textValue = t
+end
 function Frame:GetText() return self.textValue end
 function Frame:GetFontString()
     local text = self.textValue or ""
@@ -225,6 +245,43 @@ function Frame:SetTexCoordRange(low, high)
     assert(self.kind == "Cooldown" and type(low.x) == "number" and type(high.y) == "number", "bad SetTexCoordRange")
     self.texCoordRange = { low, high }
 end
+-- WowStyle1DropdownTemplate: SetupMenu builds the menu right away,
+-- GenerateMenu again; the dropdown shows its selected radio's text.
+function M.NewMenuDescription()
+    local description = { entries = {} }
+    function description:CreateRadio(text, isSelected, setSelected, data)
+        local entry = { kind = "radio", text = text, isSelected = isSelected, setSelected = setSelected, data = data }
+        self.entries[#self.entries + 1] = entry
+        return entry
+    end
+    return description
+end
+function Frame:SetupMenu(generator)
+    assert(self.template == "WowStyle1DropdownTemplate" and type(generator) == "function", "bad SetupMenu")
+    self.menuGenerator = generator
+    self:GenerateMenu()
+end
+function Frame:GenerateMenu()
+    local root = M.NewMenuDescription()
+    self.menuGenerator(self, root)
+    self.menu, self.selectedText = root.entries, nil
+    for _, entry in ipairs(root.entries) do
+        if entry.isSelected(entry.data) then
+            self.selectedText = entry.text
+        end
+    end
+end
+-- Picks the entry of a dropdown's menu showing text, as a click on it does.
+function M.Pick(dropdown, text)
+    for _, entry in ipairs(dropdown.menu) do
+        if entry.text == text then
+            entry.setSelected(entry.data)
+            dropdown:GenerateMenu()
+            return
+        end
+    end
+    error("no menu entry " .. tostring(text))
+end
 local FrameMeta = Strict(Frame, "Frame")
 
 local templates = {
@@ -237,6 +294,7 @@ local templates = {
     PortraitFrameTemplate = function() end,
     UIPanelScrollFrameTemplate = function() end,
     CooldownFrameTemplate = function(f) assert(f.kind == "Cooldown") end,
+    WowStyle1DropdownTemplate = function(f) assert(f.kind == "DropdownButton") end,
 }
 function CreateFrame(kind, name, parent, template)
     local f = setmetatable({ kind = kind, name = name, parent = parent, template = template, scripts = {}, shown = true }, FrameMeta)
@@ -306,7 +364,12 @@ function GameTooltip:AddLine(text) self.lines[#self.lines + 1] = text end
 function GameTooltip:Show() self.shown = true end
 function GameTooltip:Hide() self.shown, self.owner = false, nil end
 function GameTooltip:IsOwned(frame) return self.owner == frame end
-SOUNDKIT = { RAID_WARNING = 8959 }
+-- Build 70938's, from SoundKitConstants.lua.
+SOUNDKIT = {
+    RAID_WARNING = 8959, RAID_BOSS_EMOTE_WARNING = 12197, UI_RAID_BOSS_WHISPER_WARNING = 37666, READY_CHECK = 8960,
+    ALARM_CLOCK_WARNING_1 = 18871, ALARM_CLOCK_WARNING_2 = 12867, ALARM_CLOCK_WARNING_3 = 12889, TELL_MESSAGE = 3081,
+    UI_BNET_TOAST = 18019,
+}
 -- Blizzard's player frame, and the texts the client translates.
 PlayerFrame = CreateFrame("Frame", "PlayerFrame", UIParent)
 SECOND_ONELETTER_ABBR = "%d s"
@@ -323,7 +386,16 @@ C_Texture = {
 }
 RESIST, IMMUNE = "Resist", "Immune"
 CombatFeedbackText = { RESIST = RESIST, IMMUNE = IMMUNE }
-function PlaySound(id, channel) assert(type(id) == "number") M.sounds[#M.sounds + 1] = id end
+-- Returns whether it will play, as the game does; M.silentSounds[id] will not.
+M.silentSounds = {}
+function PlaySound(id, channel)
+    assert(type(id) == "number")
+    if M.silentSounds[id] then
+        return false
+    end
+    M.sounds[#M.sounds + 1] = id
+    return true, #M.sounds
+end
 
 C_Timer = { After = function(delay, fn) M.timers[#M.timers + 1] = { at = M.time + delay, fn = fn } end }
 -- Metadata comes from the real TOC.
@@ -345,6 +417,12 @@ Settings = {
         return c
     end,
     RegisterAddOnCategory = function(c) M.addonCategory = c end,
+    RegisterCanvasLayoutSubcategory = function(parent, frame, name)
+        assert(parent == M.mainCategory, "a subcategory of another category")
+        local c = { frame = frame, name = name }
+        M.subcategories[#M.subcategories + 1] = c
+        return c
+    end,
     OpenToCategory = function() M.openedOptions = true end,
 }
 SettingsPanel = { IsShown = function() return M.openedOptions == true end }
@@ -375,6 +453,7 @@ M.spellNames = {
     [1499] = "Freezing Trap", [14310] = "Freezing Trap", [14311] = "Freezing Trap", [99001] = "Freezing Trap",
     [13795] = "Immolation Trap", [14302] = "Immolation Trap", [13809] = "Frost Trap", [13813] = "Explosive Trap",
     [3355] = "Freezing Trap Effect", [14309] = "Freezing Trap Effect", [13797] = "Immolation Trap Effect",
+    [13810] = "Frost Trap Aura", [13812] = "Explosive Trap Effect",
     [75] = "Auto Shot", [14282] = "Arcane Shot", [3044] = "Arcane Shot", [17253] = "Bite", [16827] = "Claw",
     [2973] = "Raptor Strike", [14261] = "Raptor Strike", [1978] = "Serpent Sting", [13550] = "Serpent Sting",
     [26177] = "Charge",
@@ -388,9 +467,43 @@ C_Spell = {
         return { startTime = 0, duration = 0, isEnabled = true, isActive = false, modRate = 1 }
     end,
 }
+-- Crowd control by the client's own list: Freezing Trap's effect, of the traps.
+function C_Spell.IsSpellCrowdControl(id) return id == 3355 or id == 14308 or id == 14309 end
 function IsPlayerSpell(id) return M.known[id] == true end
 function GetNumTotemSlots() return 4 end
 function GetTotemInfo(slot) return false, "", 0, 0, 0 end
+
+-- A bitfield CVar's value is raw bytes, a control byte among them: build
+-- 70938 gave "\2G" for nameplateEnemyNpcAuraDisplay. Its bits are read with
+-- GetCVarBitfield, as Blizzard's nameplates do (M.cvarBits).
+M.cvars = { nameplateEnemyNpcAuraDisplay = "\2G", nameplateShowAllPersonalAuras = "0" }
+M.cvarBits = { nameplateEnemyNpcAuraDisplay = { true, true, true } }
+C_CVar = {
+    GetCVar = function(name) return M.cvars[name] end,
+    GetCVarBitfield = function(name, index)
+        assert(type(index) == "number", "GetCVarBitfield needs an index")
+        return M.cvarBits[name][index] or false
+    end,
+}
+-- Blizzard's nameplates, by unit token (M.Plate).
+M.plates = {}
+C_NamePlate = { GetNamePlateForUnit = function(unit) return M.plates[unit] end }
+-- A Blizzard nameplate for token whose aura lists show this many icons each
+-- (nil: the list is hidden). Each list also holds a hidden icon, as one the
+-- nameplate released.
+function M.Plate(token, yours, crowdControl, buffs)
+    local auras = CreateFrame("Frame")
+    local function List(count)
+        local list = CreateFrame("Frame", nil, auras)
+        list.shown = count ~= nil
+        for i = 1, (count or 0) + 1 do
+            CreateFrame("Frame", nil, list).shown = i <= (count or 0)
+        end
+        return list
+    end
+    auras.DebuffListFrame, auras.CrowdControlListFrame, auras.BuffListFrame = List(yours), List(crowdControl), List(buffs)
+    M.plates[token] = { UnitFrame = { AurasFrame = auras } }
+end
 
 -- M.units[token].auras = { { spellId, sourceUnit, isFromPlayerOrPlayerPet, duration, expirationTime, icon, name } }
 -- An aura with secret = true reads as secret; while M.aurasSecret, every
@@ -428,7 +541,12 @@ C_UnitAuras = {
         return true
     end,
     GetAuraDuration = function() return {} end,
+    GetPlayerAuraBySpellID = function(spellID)
+        return C_UnitAuras.GetUnitAuraBySpellID("player", spellID)
+    end,
 }
+-- What the combat text shows is secret; only its type is not.
+C_CombatText = { GetCurrentEventInfo = function() return SECRET end }
 C_Secrets = {
     HasSecretRestrictions = function() return true end,
     ShouldAurasBeSecret = function() return M.aurasSecret end,
@@ -472,7 +590,31 @@ end
 function M.Damage(token, amount)
     M.Fire("UNIT_COMBAT", token, "WOUND", "", amount or 50, 1)
 end
+-- The hunter casts a spell. As in the game (/htt probe, 2026-11-16), its
+-- global cooldown fires SPELL_UPDATE_COOLDOWN with its ID just before
+-- UNIT_SPELLCAST_SENT, and its own cooldown again once it went off.
 function M.Cast(spellID)
+    M.Fire("SPELL_UPDATE_COOLDOWN", spellID)
     M.Fire("UNIT_SPELLCAST_SENT", "player", "", "Cast-1", spellID)
     M.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", spellID)
+    M.Fire("SPELL_UPDATE_COOLDOWN", spellID)
+end
+-- A trap goes, sprung or run out: the client fires SPELL_UPDATE_COOLDOWN with
+-- its spell ID. A Freezing Trap that catches an enemy gives the hunter an
+-- aura first (the combat text's SPELL_AURA_START), and fires the event for
+-- spell 1324500 too; opts.aura or opts.hold false leaves either out.
+local FREEZING = { [1499] = true, [14310] = true, [14311] = true, [99001] = true }
+function M.Spring(spellID, opts)
+    opts = opts or {}
+    if FREEZING[spellID] and opts.aura ~= false then
+        M.Fire("COMBAT_TEXT_UPDATE", "SPELL_AURA_START")
+    end
+    if FREEZING[spellID] and opts.hold ~= false then
+        M.Fire("SPELL_UPDATE_COOLDOWN", 1324500)
+    end
+    M.Fire("SPELL_UPDATE_COOLDOWN", spellID)
+end
+-- An aura of the hunter's fades: the frozen enemy broke free, or not.
+function M.AuraFades(harmful)
+    M.Fire("COMBAT_TEXT_UPDATE", harmful and "SPELL_AURA_END_HARMFUL" or "SPELL_AURA_END")
 end

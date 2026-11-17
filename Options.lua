@@ -171,7 +171,7 @@ local function CreatePage()
     intro:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -8)
     intro:SetWidth(620)
     intro:SetJustifyH("LEFT")
-    intro:SetText(L["Shows how long your trap stays armed: 60 seconds, unless something steps on it. WoW Forever hides the combat log from addons, and enemy auras in combat, so a trap that springs is recognized by a new aura on an enemy that nothing else explains, such as a spell of yours, your pet's or your group's. In a group, an effect that comes without a spell, such as a poison, can now and then be taken for it."])
+    intro:SetText(L["Shows how long your traps stay armed: 60 seconds, unless something steps on them. WoW Forever hides the combat log from addons, but the game still tells them when your trap springs, however far away you are."])
 
     CreateHeader(page, L["Icon"], 16, -110, 620)
     CreateOption(page, 16, -134, "locked", L["Lock the icon"],
@@ -210,8 +210,105 @@ local function CreatePage()
     CreateHeader(page, L["Warning before it runs out"], 16, -350, 620)
     CreateSlider(page, 24, -394, 220, "warnSeconds", L["Seconds left"], Seconds)
     CreateOption(page, 16, -432, "warnFlash", L["Flash the icon"])
-    CreateOption(page, 16, -460, "warnSound", L["Play a sound"])
 
+    CreateHeader(page, L["After a trap springs"], 16, -472, 620)
+    CreateOption(page, 16, -496, "showEffects", L["Show how long its effect lasts"],
+        L["The trap's icon stays and counts down its effect, however far away you are: Freezing Trap's freeze until the enemy breaks free, Immolation Trap's burn until the enemy it burns dies or you leave combat, and the fire of Explosive Trap and the ice of Frost Trap for their 20 and 30 seconds. Another of your buffs fading during a freeze ends it early, as the game does not tell them apart."])
+
+    -- Each trap's sounds are on a page of their own (CreateSoundsPage).
+    local hint = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", 16, -540)
+    hint:SetText(L["Each trap's sounds are on the Sounds page, under this one."])
+
+    return page
+end
+
+-- The sounds page -----------------------------------------------------------
+
+-- A sound's name in the options.
+local function SoundName(key)
+    if key == "raidWarning" then
+        return L["Raid warning"]
+    elseif key == "bossEmote" then
+        return L["Boss emote"]
+    elseif key == "bossWhisper" then
+        return L["Boss whisper"]
+    elseif key == "readyCheck" then
+        return L["Ready check"]
+    elseif key:find("^alarm%d$") then
+        return L["Alarm clock %d"]:format(tonumber(key:match("%d")))
+    elseif key == "whisper" then
+        return L["Whisper"]
+    elseif key == "toast" then
+        return L["Notification"]
+    end
+    return L["None"]
+end
+
+-- A dropdown of the sounds, bound to one of a trap's (which: "warn" or
+-- "ended"). Choosing one plays it, to hear it.
+local function CreateSoundChoice(page, x, y, trapKey, which)
+    local dropdown = CreateFrame("DropdownButton", nil, page, "WowStyle1DropdownTemplate")
+    dropdown:SetWidth(190)
+    dropdown:SetPoint("TOPLEFT", x, y)
+    dropdown:SetupMenu(function(_, root)
+        local function IsSelected(key)
+            return ns.db.sounds[trapKey][which] == key
+        end
+        local function SetSelected(key)
+            ns.db.sounds[trapKey][which] = key
+            ns.PlaySound(key)
+        end
+        for _, sound in ipairs(ns.SOUNDS) do
+            root:CreateRadio(SoundName(sound.key), IsSelected, SetSelected, sound.key)
+        end
+    end)
+    refreshers[#refreshers + 1] = function()
+        dropdown:GenerateMenu()
+    end
+    return dropdown
+end
+
+-- The traps on the sounds page, by school, by their keys in Traps.LIST.
+local SOUND_ROWS = { "immolation", "explosive", "freezing", "frost" }
+
+local function CreateSoundsPage()
+    local page = CreateFrame("Frame")
+    page:Hide()
+    function page:OnRefresh()
+        Options.Refresh()
+    end
+
+    local heading = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    heading:SetPoint("TOPLEFT", 16, -16)
+    heading:SetText(L["Sounds"])
+    local intro = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    intro:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -8)
+    intro:SetWidth(620)
+    intro:SetJustifyH("LEFT")
+    intro:SetText(L["Each trap's sounds: one as the warning before it runs out starts, one as its effect ends. Choosing a sound plays it."])
+
+    local columns = { { x = 200, which = "warn", title = L["Before it runs out"] },
+        { x = 410, which = "ended", title = L["When its effect ends"] } }
+    for _, column in ipairs(columns) do
+        local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        title:SetPoint("TOPLEFT", column.x + 4, -84)
+        title:SetText(column.title)
+    end
+    for row, key in ipairs(SOUND_ROWS) do
+        local y = -108 - (row - 1) * 34
+        local trap
+        for _, one in ipairs(ns.Traps.LIST) do
+            trap = one.key == key and one or trap
+        end
+        -- The trap's name as the client gives it.
+        local name = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        name:SetPoint("TOPLEFT", 20, y - 6)
+        name:SetText(ns.Plain(C_Spell.GetSpellName(trap.spells[1])) or key)
+        for _, column in ipairs(columns) do
+            CreateSoundChoice(page, column.x, y, key, column.which)
+        end
+    end
     return page
 end
 
@@ -220,6 +317,7 @@ end
 function Options.Init()
     category = Settings.RegisterCanvasLayoutCategory(CreatePage(), "Hunter Trap Timer")
     Settings.RegisterAddOnCategory(category)
+    Settings.RegisterCanvasLayoutSubcategory(category, CreateSoundsPage(), L["Sounds"])
     Options.Refresh()
 end
 

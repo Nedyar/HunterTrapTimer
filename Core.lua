@@ -46,7 +46,7 @@ end
 
 -- By default the icon looks and sits like a shaman's totem (see Display.lua).
 ns.DEFAULTS = {
-    version = 2,
+    version = 3,
     position = "player", -- "player": under the player frame, where totems show; "free": at x, y
     x = 0,               -- when free, where the icon's center is, from the center of the screen
     y = -150,
@@ -56,8 +56,53 @@ ns.DEFAULTS = {
     iconSize = 37,       -- a totem button's size
     warnSeconds = 10,    -- the warning starts with this many seconds left (0: no warning)
     warnFlash = true,    -- the icon flashes during the warning
-    warnSound = true,    -- a sound when the warning starts
+    showEffects = true,  -- a trap that sprang shows its effect while it lasts: the freeze, the burn, the fire, the ice
+    -- sounds: each trap's sounds (ns.DEFAULT_SOUNDS), set apart as a table
 }
+
+-- The sounds a trap can play, in the order the options list them: none, or
+-- one of the game's own (SOUNDKIT names, all in build 70938's
+-- SoundKitConstants.lua).
+ns.SOUNDS = {
+    { key = "none" },
+    { key = "raidWarning", kit = "RAID_WARNING" },
+    { key = "bossEmote", kit = "RAID_BOSS_EMOTE_WARNING" },
+    { key = "bossWhisper", kit = "UI_RAID_BOSS_WHISPER_WARNING" },
+    { key = "readyCheck", kit = "READY_CHECK" },
+    { key = "alarm1", kit = "ALARM_CLOCK_WARNING_1" },
+    { key = "alarm2", kit = "ALARM_CLOCK_WARNING_2" },
+    { key = "alarm3", kit = "ALARM_CLOCK_WARNING_3" },
+    { key = "whisper", kit = "TELL_MESSAGE" },
+    { key = "toast", kit = "UI_BNET_TOAST" },
+}
+local soundByKey = {}
+for _, sound in ipairs(ns.SOUNDS) do
+    soundByKey[sound.key] = sound
+end
+
+-- Each trap's sounds, by its key in Traps.LIST: as the warning before it
+-- runs out starts (warn), and as its effect ends (ended). The user chose
+-- them per trap (2026-11-17); by default the warning is the raid warning, as
+-- before, and every effect's end the third alarm clock (the user's choice).
+ns.DEFAULT_SOUNDS = {
+    immolation = { warn = "raidWarning", ended = "alarm3" },
+    explosive = { warn = "raidWarning", ended = "alarm3" },
+    freezing = { warn = "raidWarning", ended = "alarm3" },
+    frost = { warn = "raidWarning", ended = "alarm3" },
+}
+
+-- Plays one of ns.SOUNDS. One the client will not play gives the raid
+-- warning instead.
+function ns.PlaySound(key)
+    local sound = soundByKey[key]
+    if not (sound and sound.kit) then
+        return
+    end
+    local kit = SOUNDKIT[sound.kit]
+    if not (kit and PlaySound(kit, "Master")) and sound.kit ~= "RAID_WARNING" then
+        PlaySound(SOUNDKIT.RAID_WARNING, "Master")
+    end
+end
 
 -- Minimum, maximum and step of the numeric settings.
 ns.LIMITS = {
@@ -93,6 +138,20 @@ local function IsNumber(value)
     return type(value) == "number" and value == value
 end
 
+-- Each trap's sounds from saved ones, any missing or unknown one the
+-- default's. silent: every warning without sound.
+local function SanitizeSounds(saved, silent)
+    local sounds = {}
+    for trap, default in pairs(ns.DEFAULT_SOUNDS) do
+        local one = type(saved) == "table" and type(saved[trap]) == "table" and saved[trap] or {}
+        sounds[trap] = {
+            warn = silent and "none" or soundByKey[one.warn] and one.warn or default.warn,
+            ended = soundByKey[one.ended] and one.ended or default.ended,
+        }
+    end
+    return sounds
+end
+
 -- Replaces missing or invalid values with the defaults. Runs on the saved
 -- settings.
 function ns.Sanitize(db)
@@ -113,6 +172,10 @@ function ns.Sanitize(db)
     end
     -- The effect's countdown, and its setting, are gone.
     db.showEffect = nil
+    -- Up to version 2 one checkbox turned every warning's sound on or off.
+    db.sounds = SanitizeSounds(db.sounds, version < 3 and db.warnSound == false)
+    -- (freezeSound: a test build's, before sounds were chosen per trap.)
+    db.warnSound, db.freezeSound = nil, nil
     -- From version 1 the icon moves to the totem's look and place, unless it
     -- was given another size or moved by hand: then it keeps them.
     if version < 2 then
@@ -136,6 +199,7 @@ function ns.ResetSettings()
     for key, value in pairs(ns.DEFAULTS) do
         ns.db[key] = value
     end
+    ns.db.sounds = SanitizeSounds()
     ns.SettingsChanged()
     ns.Options.Refresh()
 end

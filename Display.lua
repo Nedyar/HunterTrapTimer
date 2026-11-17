@@ -7,7 +7,10 @@
 -- 30, a round sweep, the seconds below). The options make it square, put the
 -- seconds on it, resize it, and free it to be dragged anywhere. The seconds
 -- turn red, and the icon flashes, while the warning is on. The icon goes when
--- the trap runs out or springs.
+-- the trap runs out; one that springs shows its effect's icon and time while
+-- it lasts (Traps.effects), the seconds in ice blue for a freeze or Frost
+-- Trap's ice, in orange for a burn or Explosive Trap's fire. The warning's
+-- sound, and the one as an effect ends, are each trap's own (ns.db.sounds).
 --
 -- A fire trap and a frost trap can be down at once, each with its icon: the
 -- fire trap's first, as the fire totem's slot comes first, and the frost
@@ -56,6 +59,28 @@ local PLAYER_X, PLAYER_Y = -16.5 - 30, 8.5 - 6.5 - 8
 local GOLD = { 1, 0.82, 0 }
 local WHITE = { 1, 1, 1 }
 local RED = { 1, 0.25, 0.25 }
+local ICE = { 0.5, 0.8, 1 }
+local FIRE = { 1, 0.55, 0.2 }
+-- An effect's seconds, and the line its tooltip adds.
+local EFFECT_COLORS = { freeze = ICE, burn = FIRE, flames = FIRE, ice = ICE }
+local function EffectLine(kind)
+    if kind == "freeze" then
+        return L["Enemy frozen"]
+    elseif kind == "burn" then
+        return L["Burning"]
+    elseif kind == "flames" then
+        return L["Fire on the ground"]
+    end
+    return L["Ice on the ground"]
+end
+
+-- The whole seconds shown for left: a trap's rounded up, as Blizzard's
+-- totems' (TotemFrame.lua); an effect's down, as the game's aura tooltips,
+-- which the user compares them with (screenshots, 2026-11-17: rounded up,
+-- the freeze read one second more than the enemy's aura).
+local function ShownSeconds(entry, left)
+    return entry.kind and math.floor(left) or math.ceil(left)
+end
 
 local anchor  -- where the first icon sits; any icon drags it while unlocked
 local mover   -- the green cover and hint shown while unlocked
@@ -66,9 +91,10 @@ local function UnderPlayerFrame()
 end
 
 -- The tooltip, as a totem's: the trap's name, its rank, and the time left,
--- in the client's words. While unlocked with no trap down, how to move it.
+-- in the client's words; an effect's says what it is. While unlocked with no
+-- trap down, how to move it.
 local function FillTooltip(icon)
-    local entry = ns.Traps.armed[icon.slot]
+    local entry = ns.Traps.Shown(icon.slot)
     if entry then
         local plain = ns.Plain
         GameTooltip:SetText(plain(C_Spell.GetSpellName(entry.spellID)) or entry.trap.key, 1, 1, 1)
@@ -76,7 +102,11 @@ local function FillTooltip(icon)
         if rank and rank ~= "" then
             GameTooltip:AddLine(rank, 0.5, 0.5, 0.5)
         end
-        local left = math.ceil(math.max(0, entry.start + entry.duration - GetTime()))
+        if entry.kind then
+            local color = EFFECT_COLORS[entry.kind]
+            GameTooltip:AddLine(EffectLine(entry.kind), color[1], color[2], color[3])
+        end
+        local left = ShownSeconds(entry, math.max(0, entry.start + entry.duration - GetTime()))
         GameTooltip:AddLine((SPELL_TIME_REMAINING_SEC or L["%d s"]):format(left), 1, 0.82, 0)
     else
         GameTooltip:SetText("Hunter Trap Timer", 1, 1, 1)
@@ -267,7 +297,7 @@ local function SecondsText(seconds)
     return seconds
 end
 
--- entry: Traps.armed[icon.slot].
+-- entry: Traps.Shown(icon.slot), a trap down or an effect.
 local function ShowTrap(icon, entry)
     if icon.entry ~= entry then
         icon.entry = entry
@@ -275,10 +305,12 @@ local function ShowTrap(icon, entry)
         icon.sweep:SetCooldown(entry.start, entry.duration)
     end
     local left = math.max(0, entry.start + entry.duration - GetTime())
-    local warning = ns.db.warnSeconds > 0 and left <= ns.db.warnSeconds
-    local seconds = math.ceil(left)
+    local warning = not entry.kind and ns.db.warnSeconds > 0 and left <= ns.db.warnSeconds
+    local seconds = ShownSeconds(entry, left)
     icon.text:SetText(SecondsText(seconds))
-    if warning then
+    if entry.kind then
+        SetColor(icon, EFFECT_COLORS[entry.kind])
+    elseif warning then
         SetColor(icon, RED)
     elseif ns.db.seconds == "below" and seconds >= (BUFF_DURATION_WARNING_TIME or 60) then
         SetColor(icon, GOLD)
@@ -308,7 +340,7 @@ function Display.Refresh()
     end
     local locked, row = ns.db.locked, 0
     for _, icon in ipairs(icons) do
-        local entry = ns.Traps.armed[icon.slot]
+        local entry = ns.Traps.Shown(icon.slot)
         if entry then
             ShowTrap(icon, entry)
         elseif not locked then
@@ -340,11 +372,15 @@ function Display.Refresh()
     anchor:SetShown(row > 0)
 end
 
--- A warning starts: the flash is drawn by Refresh, the sound plays once.
-function Display.Warn()
-    if ns.db.warnSound then
-        PlaySound(SOUNDKIT.RAID_WARNING, "Master")
-    end
+-- entry's warning starts: the flash is drawn by Refresh, its trap's sound
+-- plays once.
+function Display.Warn(entry)
+    ns.PlaySound(ns.db.sounds[entry.trap.key].warn)
+end
+
+-- A trap's effect ended: its trap's sound for that.
+function Display.EffectEnded(effect)
+    ns.PlaySound(ns.db.sounds[effect.trap.key].ended)
 end
 
 -- Under the player frame, where a totem sits, or free on the screen. Under
