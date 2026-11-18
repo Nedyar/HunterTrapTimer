@@ -70,13 +70,49 @@ local function NoTrap()
     return next(ns.Traps.armed) == nil
 end
 
--- The icon of a slot.
-local function Icon(slot)
+-- The row's icons, in its order (made as it needs them).
+local function RowIcons()
+    local list = {}
     for _, f in ipairs(M.allFrames) do
-        if f.parent == HunterTrapTimerFrame and f.roundSweep and f.slot == slot then
+        if f.parent == HunterTrapTimerFrame and f.roundSweep then
+            list[#list + 1] = f
+        end
+    end
+    return list
+end
+-- The first icon on screen showing a slot's trap or effect ("fire" or
+-- "frost"), else a stand-in that is not on screen. The icons are redrawn
+-- first: between ticks they lag by up to one tick.
+local OFF_SCREEN = { shown = false }
+local function Icon(slot)
+    ns.Display.Refresh()
+    for _, f in ipairs(RowIcons()) do
+        if f.slot == slot and M.Visible(f) then
             return f
         end
     end
+    return OFF_SCREEN
+end
+-- The texts on the row's icons on screen, in its order: "60 s, 29 s".
+local function RowTexts()
+    ns.Display.Refresh()
+    local texts = {}
+    for _, f in ipairs(RowIcons()) do
+        if M.Visible(f) then
+            texts[#texts + 1] = tostring(f.text.textValue)
+        end
+    end
+    return table.concat(texts, ", ")
+end
+-- The newest effect of a slot's trap that lasts, or nil.
+local function Effect(slot)
+    local found
+    for _, effect in ipairs(ns.Traps.effects) do
+        if effect.trap.slot == slot then
+            found = effect
+        end
+    end
+    return found
 end
 -- The text shown on a slot's icon now ("37 s" below it, 37 on it), or nil
 -- when it is not on screen. The icons are redrawn first: between ticks they
@@ -439,6 +475,16 @@ ns.db.showEffects = true
 for key, sounds in pairs(ns.db.sounds) do
     sounds.ended = ns.DEFAULT_SOUNDS[key].ended
 end
+-- The client sends the hunter's combat text only once its unit is set, which
+-- Blizzard's combat text does only when "Show combat text" is on (/htt probe,
+-- 2026-11-18): the addon sets it, and leaves Blizzard's "vehicle" alone.
+eq(M.combatTextUnit, "player", "the addon has the client send the hunter's combat text")
+M.combatTextUnit = "vehicle"
+M.Fire("PLAYER_ENTERING_WORLD", false, false)
+eq(M.combatTextUnit, "vehicle", "it leaves alone the unit Blizzard's combat text set")
+M.combatTextUnit = nil
+M.Fire("PLAYER_ENTERING_WORLD", false, false)
+eq(M.combatTextUnit, "player", "and sets it again on entering the world, when none is set")
 M.combat, M.aurasSecret = true, true
 M.Cast(1499)
 M.Advance(3)
@@ -467,6 +513,31 @@ eq(#M.sounds, before + 1, "a sound plays")
 eq(M.sounds[#M.sounds], BREAK, "its own, not the warning's")
 M.Advance(10)
 eq(#M.sounds, before + 1, "once")
+-- The enemy breaks free before the trap is told (CONFIRM): a sting's tick,
+-- the pet. Its aura's fading still ends the freeze, once.
+M.Cast(1499)
+M.Advance(2)
+before = #M.sounds
+M.Spring(1499)
+M.Advance(0.25)
+M.AuraFades()
+M.Advance(0.5)
+eq(Key("frost"), nil, "the Freezing Trap sprang")
+check(not M.Visible(Icon("frost")), "the enemy broke free before the trap was told: no freeze is shown")
+eq(#M.sounds, before + 1, "its end's sound plays")
+M.Advance(10)
+eq(#M.sounds, before + 1, "once")
+M.Cast(1499)
+M.Advance(2)
+M.AuraFades()
+M.Advance(1)
+M.Spring(1499)
+M.Advance(0.0625)
+M.AuraFades()
+M.Advance(0.5)
+eq(IconText("frost"), 9, "an aura that faded before the trap sprang, or as it did, does not end its freeze")
+M.AuraFades()
+check(not M.Visible(Icon("frost")), "its own aura's fading does")
 -- A client that will not play that sound plays the warning's.
 M.silentSounds[BREAK] = true
 M.Cast(1499)
@@ -513,7 +584,7 @@ check(M.Visible(Icon("frost")), "and so does the hunter's aura alone")
 Slash("clear")
 M.Cast(1499)
 M.Advance(2)
-M.Fire("COMBAT_TEXT_UPDATE", "SPELL_AURA_START")
+M.CombatText("SPELL_AURA_START")
 M.Advance(1)
 M.Spring(1499, { aura = false, hold = false })
 M.Advance(0.5)
@@ -525,18 +596,78 @@ M.Advance(0.5)
 check(M.Visible(Icon("frost")), "with the signs it took hold, a spring in the trap's last moment freezes too")
 Slash("clear")
 
--- A new frost trap shows over the freeze, which still ends with its sound.
+-- A new frost trap shows beside the freeze, which still ends with its sound.
 M.Cast(1499)
 M.Advance(2)
 M.Spring(1499)
 M.Advance(0.5)
 M.Cast(13809)
 eq(Key("frost"), "frost", "a new frost trap")
-eq(IconText("frost"), 60, "shows over the freeze")
+eq(RowTexts(), "60 s, 9 s", "shows first, beside the freeze")
 before = #M.sounds
 M.AuraFades()
 eq(#M.sounds, before + 1, "the freeze still ends with its sound")
-eq(Key("frost"), "frost", "and the new trap stays")
+eq(RowTexts(), "60 s", "and the new trap stays")
+Slash("clear")
+
+-- The row grows as it needs to (the user's case, 2026-11-17): a Frost Trap,
+-- an Immolation Trap 30 seconds later, the Frost Trap springs, and 30
+-- seconds after the Immolation Trap a new Frost Trap.
+M.Cast(13809)
+M.Advance(30)
+M.Cast(13795)
+M.Advance(20)
+M.Spring(13809)
+M.Advance(0.5)
+eq(RowTexts(), "40 s, 29 s", "the fire trap down, then Frost Trap's ice")
+M.Advance(9.5)
+M.Cast(13809)
+eq(RowTexts(), "30 s, 60 s, 20 s", "a new frost trap makes three: the traps down first, then the ice")
+local row = RowIcons()
+eq(-row[3].points[1][4], 74, "the third place two steps left of the first")
+eq(table.concat(HunterTrapTimerFrame.clampInsets, ","), "-74,0,0,0", "the whole row is kept on the screen")
+eq(row[3].slot, "frost", "the ice, of the frost school")
+eq(row[3].texture.path, "icon:13810", "with its icon")
+Slash("unlock")
+for _, f in ipairs(M.allFrames) do
+    if f.parent == HunterTrapTimerFrame and not f.roundSweep then
+        eq(f.points[1][2], row[3], "unlocked, the cover spans the whole row, to its third place")
+    end
+end
+Slash("lock")
+row[3].scripts.OnEnter(row[3])
+eq(GameTooltip.lines[2], "Ice on the ground", "and its tooltip")
+-- Its second Frost Trap springs: two ices on the ground, oldest first.
+M.Advance(5)
+M.Spring(13809)
+M.Advance(0.5)
+eq(RowTexts(), "25 s, 14 s, 29 s", "the second ice beside the first, oldest first")
+eq(#ns.Traps.effects, 2, "two effects of one trap at once")
+eq(GameTooltip.lines[2], "Ice on the ground", "the tooltip goes on with its icon's place")
+row[3].scripts.OnLeave(row[3])
+M.Advance(14.25)
+eq(RowTexts(), "11 s, 0 s, 15 s", "an effect's last second reads 0, as the game's aura tooltips")
+M.Advance(0.375)
+eq(RowTexts(), "10 s, 14 s", "the first ice gone, the row closes up")
+eq(table.concat(HunterTrapTimerFrame.clampInsets, ","), "-37,0,0,0", "and keeps what is left on the screen")
+M.Advance(15.5)
+eq(RowTexts(), "", "all gone")
+check(not M.Visible(HunterTrapTimerFrame), "the row with them")
+
+-- Two freezes at once (the second trap's cast after the cooldown, while the
+-- first one's enemy is still frozen): an aura of the hunter's fading ends
+-- the one due to end first.
+M.Cast(1499)
+M.Advance(25)
+M.Spring(1499)
+M.Advance(5)
+M.Cast(14311)
+M.Advance(2)
+M.Spring(14311)
+M.Advance(0.5)
+eq(RowTexts(), "2 s, 19 s", "two freezes, oldest first")
+M.AuraFades()
+eq(RowTexts(), "19 s", "an aura fading ends the one due to end first")
 Slash("clear")
 
 -- Read out of combat, the freeze lasts as long as its aura.
@@ -599,7 +730,7 @@ eq(icon.texture.path, "icon:13797", "with the burn's icon")
 icon.scripts.OnEnter(icon)
 eq(GameTooltip.lines[2], "Burning", "its tooltip says what it is")
 icon.scripts.OnLeave(icon)
-eq(#ns.Traps.effects.fire.victims, 1, "on one enemy, seen as the target too, and not on a friend")
+eq(#Effect("fire").victims, 1, "on one enemy, seen as the target too, and not on a friend")
 M.Advance(3)
 M.HiddenAura("nameplate2")
 M.units.nameplate2.dead = true
@@ -633,7 +764,7 @@ M.Spring(13795)
 M.HiddenAura("nameplate1")
 M.HiddenAura("nameplate2")
 M.Advance(0.5)
-eq(#ns.Traps.effects.fire.victims, 2, "every enemy an aura turned up on as it sprang counts")
+eq(#Effect("fire").victims, 2, "every enemy an aura turned up on as it sprang counts")
 M.units.nameplate1.dead = true
 M.Fire("UNIT_HEALTH", "nameplate1")
 check(M.Visible(Icon("fire")), "one of them dying leaves the burn")
@@ -655,7 +786,7 @@ eq(icon.texture.path, "icon:13812", "with the fire's icon")
 icon.scripts.OnEnter(icon)
 eq(GameTooltip.lines[2], "Fire on the ground", "its tooltip says what it is")
 icon.scripts.OnLeave(icon)
-eq(ns.Traps.effects.fire.victims, nil, "it keeps no enemies")
+eq(Effect("fire").victims, nil, "it keeps no enemies")
 M.units.nameplate1.dead = true
 M.Fire("UNIT_HEALTH", "nameplate1")
 M.Fire("PLAYER_REGEN_ENABLED")
@@ -670,7 +801,7 @@ M.Cast(13795)
 M.Advance(2)
 M.Spring(13795)
 M.Advance(0.5)
-eq(#ns.Traps.effects.fire.victims, 0, "a burn far away has no enemy seen")
+eq(#Effect("fire").victims, 0, "a burn far away has no enemy seen")
 M.Advance(5)
 check(M.Visible(Icon("fire")), "it lasts")
 M.Fire("PLAYER_REGEN_ENABLED")
@@ -688,7 +819,7 @@ M.Cast(13795)
 M.Advance(2)
 M.AddAura("nameplate1", 13797, 12)
 eq(IconText("fire"), 12, "read out of combat, the burn lasts as long as its aura")
-eq(#ns.Traps.effects.fire.victims, 1, "on the enemy it is on")
+eq(#Effect("fire").victims, 1, "on the enemy it is on")
 M.RemoveAura("nameplate1", 13797)
 Slash("clear")
 
@@ -703,27 +834,42 @@ Sprang("frost", "with effects not shown, the trap's icon goes")
 before = #M.sounds
 M.Advance(10)
 eq(#M.sounds, before + 1, "the sound still plays as the enemy breaks free")
-ns.db.sounds.immolation.ended = "none"
+ns.db.sounds.immolation.ended, ns.db.sounds.immolation.early = "none", "none"
 M.Cast(13795)
 M.Advance(2)
 M.Spring(13795)
 M.Advance(0.5)
-eq(ns.Traps.effects.fire, nil, "and a burn with no sound for its end is not kept")
-ns.db.sounds.immolation.ended = "alarm2"
+eq(Effect("fire"), nil, "and a burn with no sound for its end is not kept")
+ns.db.sounds.immolation.early = "alarm2"
 M.Cast(13795)
 M.Advance(2)
 M.Spring(13795)
 M.Advance(0.5)
-check(ns.Traps.effects.fire ~= nil and not M.Visible(Icon("fire")), "one with a sound for its end is, though not shown")
+check(Effect("fire") ~= nil and not M.Visible(Icon("fire")), "one with a sound for its early end is, though not shown")
 M.Fire("PLAYER_REGEN_ENABLED")
-eq(M.sounds[#M.sounds], SOUNDKIT.ALARM_CLOCK_WARNING_2, "and its end plays its trap's sound")
-ns.db.sounds.immolation.ended = "alarm3"
-ns.db.sounds.freezing.ended = "none"
+eq(M.sounds[#M.sounds], SOUNDKIT.ALARM_CLOCK_WARNING_2, "and leaving combat before its time plays that sound")
+ns.db.sounds.immolation.ended, ns.db.sounds.immolation.early = "alarm2", "none"
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.Advance(0.5)
+check(Effect("fire") ~= nil, "so is one with a sound only for its time running out")
+before = #M.sounds
+M.Fire("PLAYER_REGEN_ENABLED")
+eq(#M.sounds, before, "which an early end does not play")
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.Advance(15)
+eq(#M.sounds, before + 1, "but its time running out does")
+eq(M.sounds[#M.sounds], SOUNDKIT.ALARM_CLOCK_WARNING_2, "that sound")
+ns.db.sounds.immolation.ended, ns.db.sounds.immolation.early = "alarm3", "alarm3"
+ns.db.sounds.freezing.ended, ns.db.sounds.freezing.early = "none", "none"
 M.Cast(1499)
 M.Advance(2)
 M.Spring(1499)
 M.Advance(0.5)
-eq(ns.Traps.effects.frost, nil, "with neither, no freeze is kept")
+eq(Effect("frost"), nil, "with neither, no freeze is kept")
 ns.db.showEffects = true
 before = #M.sounds
 M.Cast(1499)
@@ -733,7 +879,62 @@ M.Advance(0.5)
 check(M.Visible(Icon("frost")), "the freeze shown with no sound")
 M.Advance(10)
 eq(#M.sounds, before, "breaks free silently")
-ns.db.sounds.freezing.ended = "alarm3"
+ns.db.sounds.freezing.ended, ns.db.sounds.freezing.early = "alarm3", "alarm3"
+
+-- The freeze and the burn, on an enemy, can end early, with a sound of their
+-- own (the user, 2026-11-18); run out, they play their end's.
+local EARLY = SOUNDKIT.UI_BNET_TOAST
+ns.db.sounds.freezing.early, ns.db.sounds.immolation.early = "toast", "toast"
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(3)
+before = #M.sounds
+M.AuraFades()
+eq(M.sounds[#M.sounds], EARLY, "an enemy breaking free before the freeze's time plays its early sound")
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(0.25)
+M.AuraFades()
+M.Advance(0.5)
+eq(M.sounds[#M.sounds], EARLY, "so does one breaking free before the trap was told")
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(10)
+eq(M.sounds[#M.sounds], BREAK, "the freeze running its time plays its end's")
+M.Cast(1499)
+M.Advance(2)
+M.Spring(1499)
+M.Advance(9.625)
+M.AuraFades()
+eq(M.sounds[#M.sounds], BREAK, "and so does its aura fading as its time is up")
+eq(#M.sounds, before + 4, "each once")
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.HiddenAura("nameplate1")
+M.Advance(5)
+M.units.nameplate1.dead = true
+M.Fire("UNIT_HEALTH", "nameplate1")
+eq(M.sounds[#M.sounds], EARLY, "the enemy a burn burns dying before its time plays its early sound")
+M.units.nameplate1.dead = false
+M.Cast(13795)
+M.Advance(2)
+M.Spring(13795)
+M.HiddenAura("nameplate1")
+M.Advance(15)
+eq(M.sounds[#M.sounds], BREAK, "the burn running its time plays its end's")
+M.Cast(13809)
+M.Advance(2)
+M.Spring(13809)
+M.Advance(2)
+M.Fire("PLAYER_REGEN_ENABLED")
+M.AuraFades()
+M.Advance(28.5)
+eq(M.sounds[#M.sounds], BREAK, "the ice on the ground has no early end")
+ns.db.sounds.freezing.early, ns.db.sounds.immolation.early = "alarm3", "alarm3"
 
 -- /htt clear clears a freeze too.
 M.Cast(1499)
@@ -741,7 +942,7 @@ M.Advance(2)
 M.Spring(1499)
 M.Advance(0.5)
 Slash("clear")
-check(ns.Traps.effects.frost == nil and not M.Visible(Icon("frost")), "/htt clear clears the freeze too")
+check(Effect("frost") == nil and not M.Visible(Icon("frost")), "/htt clear clears the freeze too")
 eq(M.printed[#M.printed], "|cffabd473Hunter Trap Timer|r: countdown cleared.", "and says so")
 M.combat, M.aurasSecret = false, false
 NoErrors("with freezes")
@@ -777,7 +978,7 @@ eq(IconShift("frost"), 37, "each where it will show")
 local fireIcon, frostIcon = Icon("fire"), Icon("frost")
 local cover
 for _, f in ipairs(M.allFrames) do
-    if f.parent == HunterTrapTimerFrame and not f.slot then
+    if f.parent == HunterTrapTimerFrame and not f.roundSweep then
         cover = f
     end
 end
@@ -833,7 +1034,7 @@ for _, f in ipairs(Frames("DropdownButton", "WowStyle1DropdownTemplate")) do
         dropdowns[#dropdowns + 1] = f
     end
 end
-eq(#dropdowns, 8, "two dropdowns for each of the four traps")
+eq(#dropdowns, 10, "two dropdowns for each of the four traps, and a third for the freeze's and the burn's early end")
 local rowNames = {}
 for _, region in ipairs(soundsPage.frame.regions) do
     if region.kind == "FontString" and region.points and region.points[1][2] == 20 then
@@ -843,11 +1044,23 @@ end
 eq(table.concat(rowNames, ", "), "Immolation Trap, Explosive Trap, Freezing Trap, Frost Trap",
     "the traps by school, by the client's names")
 -- The rows go Immolation, Explosive, Freezing, Frost; each the warning's,
--- then its effect's end.
-local immolationWarn, freezingWarn, freezingEnded = dropdowns[1], dropdowns[5], dropdowns[6]
+-- then its effect's running out, then, for Immolation and Freezing Trap,
+-- its early end.
+local immolationWarn, freezingWarn, freezingEnded = dropdowns[1], dropdowns[6], dropdowns[7]
 eq(immolationWarn.selectedText, "Raid warning", "a warning sounds the raid warning by default")
 eq(freezingEnded.selectedText, "Alarm clock 3", "an effect's end the third alarm clock")
 eq(dropdowns[2].selectedText, "Alarm clock 3", "every trap's")
+eq(dropdowns[3].selectedText .. ", " .. dropdowns[8].selectedText, "Alarm clock 3, Alarm clock 3",
+    "and an early end too")
+local xs = {}
+for _, dropdown in ipairs(dropdowns) do
+    xs[#xs + 1] = dropdown.points[1][2]
+end
+eq(table.concat(xs, " "), "190 345 500 190 345 190 345 500 190 345",
+    "in three columns, the third only for Immolation and Freezing Trap")
+M.Pick(dropdowns[8], "Whisper")
+eq(ns.db.sounds.freezing.early, "whisper", "the early end's dropdown sets its sound")
+M.Pick(dropdowns[8], "Alarm clock 3")
 local names = {}
 for _, entry in ipairs(immolationWarn.menu) do
     names[#names + 1] = entry.text
@@ -1052,7 +1265,7 @@ M.Fire("SPELL_UPDATE_COOLDOWN", 1324500, 1324500, 0, 0)
 M.AddUnit("player", { name = "Hunter", auras = { { spellId = 1324500, sourceUnit = "player", isFromPlayerOrPlayerPet = true,
     duration = 10, expirationTime = GetTime() + 10 } } })
 M.Fire("UNIT_AURA", "player", { addedAuras = { SECRET } })
-M.Fire("COMBAT_TEXT_UPDATE", "SPELL_AURA_START")
+M.CombatText("SPELL_AURA_START")
 M.Fire("PLAYER_TOTEM_UPDATE", 1)
 M.Fire("NAME_PLATE_UNIT_REMOVED", "nameplate2")
 M.Cast(1499)
@@ -1074,6 +1287,7 @@ ProbeText()
 check(Has(text, "Hunter Trap Timer " .. C_AddOns.GetAddOnMetadata("HunterTrapTimer", "Version") .. " - probe"),
     "the report's title")
 check(Has(text, "Combat log restricted: true"), "the combat log answer")
+check(Has(text, "Combat text about: player (show combat text: 0)."), "which unit the combat text is about, and the option")
 check(Has(text, "Armed: fire: immolation (spell 13795), 60.0 s left; frost: freezing (spell 1499), 60.0 s left."),
     "the traps down, by school")
 check(Has(text, "1499 Freezing Trap: 0, 1, false; enabled true, active false"), "the trap spells known")
@@ -1087,7 +1301,8 @@ check(Has(text, "UNIT_SPELLCAST_SUCCEEDED party1 (Friend): secret"), "the group'
 check(Has(text, "addon: sprang (its effect 3355 on nameplate1): freezing"), "a spring told by its effect is logged")
 check(Has(text, "addon: sprang (its cooldown event): freezing"), "and one told by its cooldown event")
 check(Has(text, "addon: freeze: 10.0 s"), "and the freeze")
-check(Has(text, "Effects: fire: none; frost: freeze, 9.5 s left."), "the report tells the effects")
+check(Has(text, "Effects: freezing's freeze, 6.3 s left; freezing's freeze, 9.5 s left."),
+    "the report tells the effects, oldest first")
 check(Has(text, "UNIT_COMBAT nameplate1 (Kobold): WOUND  secret, school 16"), "damage is logged, its amount secret")
 local _, plateLines = text:gsub("plate nameplate1 %(Kobold%): yours 0, crowd control 1, buffs hidden", "")
 eq(plateLines, 1, "the icons on Blizzard's nameplate are logged a moment after an aura, once while they stay the same")
@@ -1217,6 +1432,14 @@ eq(ns.db.sounds.freezing.warn .. " " .. ns.db.sounds.freezing.ended, "alarm1 ala
     "a trap's good sound is kept, an unknown one replaced")
 eq(ns.db.sounds.frost.warn .. " " .. ns.db.sounds.explosive.ended .. " " .. ns.db.sounds.immolation.warn,
     "raidWarning alarm3 raidWarning", "bad or missing traps get the defaults")
+-- Before 0.3.1 one sound played at every end: an early end keeps it.
+ns = NewSession({ saved = { version = 3, sounds = { freezing = { ended = "toast" }, immolation = { ended = "x" },
+    frost = { ended = "whisper", early = "toast" } } } })
+eq(ns.db.sounds.freezing.early, "toast", "an early end keeps the sound chosen for the effect's end")
+eq(ns.db.sounds.immolation.early, "alarm3", "or the default, when that one is unknown")
+eq(ns.db.sounds.frost.early, nil, "an effect on the ground has no early end")
+ns = NewSession({ saved = { version = 3, sounds = { freezing = { ended = "toast", early = "whisper" } } } })
+eq(ns.db.sounds.freezing.early, "whisper", "a chosen early sound is kept")
 -- Up to version 2 one checkbox turned every warning's sound on or off.
 ns = NewSession({ saved = { version = 2, warnSound = false } })
 eq(ns.db.sounds.immolation.warn .. " " .. ns.db.sounds.frost.warn, "none none", "warnings without sound stay so")

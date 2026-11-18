@@ -14,19 +14,21 @@ long your hunter traps stay armed before they vanish.
 - **Shown like a totem.** By default the icon looks like a shaman's
   totem: round, in a totem's ring, with the seconds below it. It sits under
   your portrait, clear of your pet's frame, at the player frame's scale
-  (following it when Edit Mode moves or resizes it); with both traps down,
-  the frost trap's icon goes to the left of the fire trap's, under your
-  level. Its tooltip, as a
-  totem's, gives the trap's name, rank and time left. The options make the
-  icons square, put the seconds on them, resize them, or free them to be
-  dragged anywhere.
+  (following it when Edit Mode moves or resizes it). The icons make a row
+  leftwards, as totems do: first the traps down, the fire trap's then the
+  frost trap's (under your level), then each effect that lasts, oldest
+  first, so the row grows as it needs to. Its tooltip, as a totem's, gives
+  the trap's name, rank and time left. The options make the icons square,
+  put the seconds on them, resize them, or free them to be dragged
+  anywhere.
 - **Warning before it runs out.** With 10 seconds left (adjustable, or off)
   the seconds turn red, the icon flashes and the trap's sound plays.
 - **Notices when a trap springs, however far away you are.** A trap that
   springs is gone, so its icon goes, even with the enemy out of sight or
   enemy nameplates off.
-- **How long its effect lasts.** Once a trap springs, its icon stays and
-  counts down its effect: Freezing Trap's freeze (the seconds in ice blue)
+- **How long its effect lasts.** Once a trap springs, an icon counts down
+  its effect, beside any new trap and any other effect (two of Frost Trap's
+  ices can be on the ground at once): Freezing Trap's freeze (the seconds in ice blue)
   until the enemy breaks free; Immolation Trap's burn (in orange) until the
   enemy it burns dies or you leave combat; Explosive Trap's fire (in orange)
   and Frost Trap's ice (in ice blue) for the 20 and 30 seconds they stay on
@@ -34,9 +36,11 @@ long your hunter traps stay armed before they vanish.
   round them (the armed trap's are rounded up, as a totem's). The countdown
   can be turned off in the options.
 - **A sound for each trap.** On the options' Sounds page, each trap has its
-  own sound for the warning and one for when its effect ends, out of nine of
-  the game's sounds or none; choosing one plays it. By default the warnings
-  play the raid warning, and every effect's end the third alarm clock.
+  own sound for the warning and one for when its effect runs out, out of
+  nine of the game's sounds or none; choosing one plays it. Freezing Trap's
+  freeze and Immolation Trap's burn have one more, for when they end early,
+  the enemy broken free or dead. By default the warnings play the raid
+  warning, and every effect's end the third alarm clock, early or not.
 - **Keeps the countdowns through a `/reload`.** The traps stay in the world
   when you reload the interface, and so do their countdowns.
 - **Every client language.** The texts are in English, German, Spanish (EU
@@ -99,8 +103,10 @@ Each effect lasts its rank's whole time unless the addon sees it end:
   frozen in your Freezing Trap, you have an aura of your own (the combat text
   shows "<Freezing Trap>", and "<Freezing Trap> fades" as the enemy breaks
   free). Which aura is secret in combat, but the kind of combat text is not,
-  even with floating combat text off, so the freeze ends at the first aura of
-  yours that fades after it began. Another of your buffs fading meanwhile
+  so the freeze ends at the first aura of yours that fades after it began.
+  The game sends that combat text to addons only once it is told whose to
+  send, which its own combat text does only with "Show combat text" on; so
+  the addon tells it, the hunter's, when nothing has. Another of your buffs fading meanwhile
   ends it early, as the game does not tell them apart. The freeze counts as
   having taken hold if, as the trap sprang, that aura came or the game
   updated the cooldown of spell 1324500, as it does whenever a Freezing Trap

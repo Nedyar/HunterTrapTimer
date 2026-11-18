@@ -12,12 +12,15 @@
 -- Trap's ice, in orange for a burn or Explosive Trap's fire. The warning's
 -- sound, and the one as an effect ends, are each trap's own (ns.db.sounds).
 --
--- A fire trap and a frost trap can be down at once, each with its icon: the
--- fire trap's first, as the fire totem's slot comes first, and the frost
--- trap's to its left, as far apart as totems in their row, which puts it
--- right under the level circle. A lone trap's icon always takes the first
--- place. (A column, the first try, the user swapped for this row:
--- screenshot, 2026-11-10.)
+-- The icons make a row, from the first place leftwards, as far apart as
+-- totems in their row (the second right under the level circle): first the
+-- traps down, the fire trap's then the frost trap's, as the fire totem's
+-- slot comes first, then the effects that last, oldest first. So the row
+-- grows as it needs to: a trap down and its school's effects show side by
+-- side, two effects of one trap too (the user, 2026-11-17: a Frost Trap's
+-- ice, a fire trap and a new frost trap down make three icons). A lone
+-- icon always takes the first place. (A column, the first try, the user
+-- swapped for this row: screenshot, 2026-11-10.)
 local _, ns = ...
 local L = ns.L
 
@@ -84,17 +87,18 @@ end
 
 local anchor  -- where the first icon sits; any icon drags it while unlocked
 local mover   -- the green cover and hint shown while unlocked
-local icons = {} -- one for each slot of Traps.SLOTS, in its order
+local icons = {} -- made as the row needs them: icons[i] shows its i-th place
+local shownCount -- how many places the row shows
 
 local function UnderPlayerFrame()
     return ns.db.position == "player" and PlayerFrame ~= nil
 end
 
 -- The tooltip, as a totem's: the trap's name, its rank, and the time left,
--- in the client's words; an effect's says what it is. While unlocked with no
--- trap down, how to move it.
+-- in the client's words; an effect's says what it is. While unlocked, an
+-- empty place's, how to move them.
 local function FillTooltip(icon)
-    local entry = ns.Traps.Shown(icon.slot)
+    local entry = icon.entry
     if entry then
         local plain = ns.Plain
         GameTooltip:SetText(plain(C_Spell.GetSpellName(entry.spellID)) or entry.trap.key, 1, 1, 1)
@@ -138,9 +142,9 @@ local function CreateSweep(icon)
     return sweep
 end
 
-local function CreateIcon(slot)
+-- An icon; slot, the school of what it shows, is set as it shows it.
+local function CreateIcon()
     local icon = CreateFrame("Frame", nil, anchor)
-    icon.slot = slot
     -- Square: a black edge around the icon.
     icon.edge = icon:CreateTexture(nil, "BACKGROUND")
     icon.edge:SetPoint("TOPLEFT", -2, 2)
@@ -297,7 +301,7 @@ local function SecondsText(seconds)
     return seconds
 end
 
--- entry: Traps.Shown(icon.slot), a trap down or an effect.
+-- entry: a trap down or an effect.
 local function ShowTrap(icon, entry)
     if icon.entry ~= entry then
         icon.entry = entry
@@ -330,6 +334,42 @@ local function ShowPlaceholder(icon)
     SetFlashing(icon, false)
 end
 
+-- The row's places, in order: { slot, entry }. The traps down, the fire
+-- trap's first; while unlocked, a trap's place shows even with none down.
+-- Then, when shown, the effects that last, oldest first.
+local function Places()
+    local places = {}
+    for _, slot in ipairs(ns.Traps.SLOTS) do
+        local entry = ns.Traps.armed[slot]
+        if entry or not ns.db.locked then
+            places[#places + 1] = { slot = slot, entry = entry }
+        end
+    end
+    if ns.db.showEffects then
+        for _, effect in ipairs(ns.Traps.effects) do
+            places[#places + 1] = { slot = effect.trap.slot, entry = effect }
+        end
+    end
+    return places
+end
+
+-- The mouse brings an icon's tooltip up but clicks go through, unless
+-- unlocked to be dragged.
+local function ApplyIconSettings(icon)
+    icon:SetMouseMotionEnabled(true)
+    icon:SetMouseClickEnabled(not ns.db.locked)
+    Layout(icon)
+end
+
+-- The icon of the row's index-th place, made when first needed.
+local function GetIcon(index)
+    if not icons[index] then
+        icons[index] = CreateIcon()
+        ApplyIconSettings(icons[index])
+    end
+    return icons[index]
+end
+
 function Display.Refresh()
     if not anchor then
         return
@@ -338,38 +378,48 @@ function Display.Refresh()
     if UnderPlayerFrame() and anchor:GetScale() ~= PlayerFrame:GetScale() then
         anchor:SetScale(PlayerFrame:GetScale())
     end
-    local locked, row = ns.db.locked, 0
-    for _, icon in ipairs(icons) do
-        local entry = ns.Traps.Shown(icon.slot)
-        if entry then
-            ShowTrap(icon, entry)
-        elseif not locked then
-            ShowPlaceholder(icon)
+    local places = Places()
+    for index, place in ipairs(places) do
+        local icon = GetIcon(index)
+        icon.slot = place.slot
+        if place.entry then
+            ShowTrap(icon, place.entry)
         else
-            icon.entry = nil
-            SetFlashing(icon, false)
+            ShowPlaceholder(icon)
         end
-        local shown = entry ~= nil or not locked
-        if shown then
-            row = row + 1
-            if icon.row ~= row then
-                icon.row = row
-                icon:ClearAllPoints()
-                icon:SetPoint("CENTER", anchor, "CENTER", -(row - 1) * ColumnStep(), 0)
-            end
+        if icon.row ~= index then
+            icon.row = index
+            icon:ClearAllPoints()
+            icon:SetPoint("CENTER", anchor, "CENTER", -(index - 1) * ColumnStep(), 0)
         end
-        icon:SetShown(shown)
-        -- The tooltip counts down with the icon, and goes with it.
+        icon:Show()
+        -- The tooltip counts down with the icon.
         if GameTooltip:IsOwned(icon) then
-            if shown then
-                FillTooltip(icon)
-            else
-                GameTooltip:Hide()
-            end
+            FillTooltip(icon)
         end
     end
-    mover:SetShown(not locked)
-    anchor:SetShown(row > 0)
+    for index = #places + 1, #icons do
+        local icon = icons[index]
+        icon.entry = nil
+        SetFlashing(icon, false)
+        icon:Hide()
+        -- ... and goes with it.
+        if GameTooltip:IsOwned(icon) then
+            GameTooltip:Hide()
+        end
+    end
+    if shownCount ~= #places then
+        shownCount = #places
+        -- The whole row stays on the screen, not only the first place, and
+        -- the unlocked cover spans it, from the last place, leftmost.
+        local last = math.max(shownCount, 1)
+        anchor:SetClampRectInsets(-(last - 1) * ColumnStep(), 0, 0, 0)
+        mover:ClearAllPoints()
+        mover:SetPoint("TOPLEFT", GetIcon(last), "TOPLEFT")
+        mover:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT")
+    end
+    mover:SetShown(not ns.db.locked)
+    anchor:SetShown(#places > 0)
 end
 
 -- entry's warning starts: the flash is drawn by Refresh, its trap's sound
@@ -378,9 +428,11 @@ function Display.Warn(entry)
     ns.PlaySound(ns.db.sounds[entry.trap.key].warn)
 end
 
--- A trap's effect ended: its trap's sound for that.
-function Display.EffectEnded(effect)
-    ns.PlaySound(ns.db.sounds[effect.trap.key].ended)
+-- A trap's effect ended, early or as its time was up: its trap's sound for
+-- that.
+function Display.EffectEnded(effect, early)
+    local sounds = ns.db.sounds[effect.trap.key]
+    ns.PlaySound(early and sounds.early or sounds.ended)
 end
 
 -- Under the player frame, where a totem sits, or free on the screen. Under
@@ -406,14 +458,10 @@ function Display.ApplySettings()
     Place()
     anchor:SetSize(db.iconSize, db.iconSize)
     for _, icon in ipairs(icons) do
-        -- The mouse brings the tooltip up but clicks go through, unless
-        -- unlocked to be dragged.
-        icon:SetMouseMotionEnabled(true)
-        icon:SetMouseClickEnabled(not db.locked)
-        Layout(icon)
+        ApplyIconSettings(icon)
     end
-    -- The whole row stays on the screen, not only the first place.
-    anchor:SetClampRectInsets(-(#icons - 1) * ColumnStep(), 0, 0, 0)
+    -- The places are as far apart as the size makes them.
+    shownCount = nil
     Display.Refresh()
 end
 
@@ -421,15 +469,9 @@ function Display.Init()
     anchor = CreateFrame("Frame", "HunterTrapTimerFrame", UIParent)
     anchor:SetMovable(true)
     anchor:SetClampedToScreen(true)
-    for index, slot in ipairs(ns.Traps.SLOTS) do
-        icons[index] = CreateIcon(slot)
-    end
 
-    -- Unlocked, every place shows, so the cover spans them all, from the last
-    -- one, leftmost, to the first.
+    -- Unlocked, the cover spans the row (Refresh anchors it).
     mover = CreateFrame("Frame", nil, anchor)
-    mover:SetPoint("TOPLEFT", icons[#icons], "TOPLEFT")
-    mover:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT")
     mover:SetFrameLevel(anchor:GetFrameLevel() + 20)
     local cover = mover:CreateTexture(nil, "OVERLAY")
     cover:SetAllPoints()

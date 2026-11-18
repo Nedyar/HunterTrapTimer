@@ -29,11 +29,12 @@
 --   own: the combat text shows "<Freezing Trap>" as the trap springs, and
 --   "<Freezing Trap> fades" as the enemy breaks free. Which aura is secret in
 --   combat, but the type of COMBAT_TEXT_UPDATE is not: SPELL_AURA_START as
---   the trap springs, SPELL_AURA_END as the freeze ends, at any distance and
---   with floating combat text off (/htt probe and the user, 2026-11-16). So
---   the freeze lasts until the first SPELL_AURA_END after it began, or its
---   rank's whole time. Another of the hunter's buffs that fades meanwhile
---   ends it early too, which the user accepted. The freeze took hold if, as
+--   the trap springs, SPELL_AURA_END as the freeze ends, at any distance
+--   (/htt probe and the user, 2026-11-16). The client sends it only once the
+--   unit it is about is set (WatchCombatText). So the freeze lasts until the
+--   first SPELL_AURA_END after it began, or its rank's whole time. Another of
+--   the hunter's buffs that fades meanwhile ends it early too, which the
+--   user accepted. The freeze took hold if, as
 --   the trap sprang, that aura came, or the client fired
 --   SPELL_UPDATE_COOLDOWN for FREEZE_TOOK_HOLD, as it did for every Freezing
 --   Trap that caught an enemy.
@@ -46,7 +47,9 @@
 -- - Explosive Trap's fire and Frost Trap's ice, which stay on the ground
 --   their whole time, whoever dies (the user, 2026-11-17).
 -- Each trap's effect may end with a sound of the player's choosing
--- (ns.db.sounds, Display.EffectEnded).
+-- (ns.db.sounds, Display.EffectEnded): one as its time is up, and for the
+-- freeze and the burn, which are on an enemy, another as they end early,
+-- the enemy broken free or dead (the user, 2026-11-18).
 --
 -- /htt probe (Probe.lua) shows what the client lets through.
 local _, ns = ...
@@ -90,6 +93,9 @@ local FREEZE_TOOK_HOLD = 1324500
 local HOLD_WINDOW = 0.5
 -- A SPELL_AURA_END this soon after the freeze began is not its end.
 local FREEZE_SETTLE = 0.2
+-- An effect told to end this close to its whole time ran its time (a freeze's
+-- aura faded 0.1 seconds after its 10, in the probe).
+local ON_TIME = 0.5
 -- How long auras that turned up on enemies are kept, to find a burn's.
 local KEEP_AURAS = 2
 
@@ -100,7 +106,8 @@ local KEEP_AURAS = 2
 -- the last two on the ground); lasts: how
 -- long, in seconds, by rank, the last for ranks past the list's (Classic's
 -- times: the probe saw rank 1's freeze last 10 seconds, and Immolation
--- Trap's burn tick every 3 seconds).
+-- Trap's burn tick every 3 seconds); endsEarly: its effect, on an enemy, can
+-- end before its time, with a sound of its own.
 Traps.LIST = {
     {
         key = "immolation",
@@ -109,6 +116,7 @@ Traps.LIST = {
         effects = { 13797, 14298, 14299, 14300, 14301 },
         effect = "burn",
         lasts = { 15 },
+        endsEarly = true,
     },
     {
         key = "freezing",
@@ -117,6 +125,7 @@ Traps.LIST = {
         effects = { 3355, 14308, 14309 },
         effect = "freeze",
         lasts = { 10, 15, 20 },
+        endsEarly = true,
     },
     {
         key = "frost",
@@ -155,14 +164,18 @@ end
 -- gone.
 Traps.armed = {}
 Traps.lastArmed = {}
--- Traps.effects[slot] is the effect of the last trap of that slot that
--- sprang, while it lasts: { kind (trap.effect), trap, rank, spellID (the
--- effect's), icon, start, duration, victims }, or nil. victims, of a burn:
--- { guid, unit, dead } for each enemy it caught that was seen.
+-- Traps.effects lists the effects of the traps that sprang while they last,
+-- oldest first: { kind (trap.effect), trap, rank, spellID (the effect's),
+-- icon, start, duration, victims }. victims, of a burn: { guid, unit, dead }
+-- for each enemy it caught that was seen. Effects of one school can last
+-- side by side, and beside a new trap of it: Frost Trap's ice lasts 30
+-- seconds, as long as the cooldown before the next trap, so two can be on
+-- the ground (the user, 2026-11-17).
 Traps.effects = {}
 
 local lastSent = {}             -- [slot] = GetTime() of the hunter's last cast of a trap of that school
 local auraStartAt = -math.huge  -- of the last SPELL_AURA_START combat text: the hunter got an aura
+local auraEndAt = -math.huge    -- of the last SPELL_AURA_END combat text that ended no freeze
 local tookHoldAt = -math.huge   -- of the last SPELL_UPDATE_COOLDOWN for FREEZE_TOOK_HOLD
 local recentAuras = {}          -- { unit, guid, at } for each aura that turned up on an enemy lately
 
@@ -186,12 +199,6 @@ function Traps.Armed()
         list[#list + 1] = Traps.armed[slot]
     end
     return list
-end
-
--- What a slot's icon shows: its trap down, else its trap's effect, when
--- effects are shown.
-function Traps.Shown(slot)
-    return Traps.armed[slot] or ns.db.showEffects and Traps.effects[slot] or nil
 end
 
 -- Runs Traps.Update while a trap is down or an effect lasts.
@@ -267,10 +274,11 @@ end
 
 -- entry's effect starts at the time at, lasting its rank's time unless left
 -- is given (read from its aura). Kept only when effects are shown, or it
--- ends with a sound.
+-- ends with a sound. Returns it, if kept.
 local function StartEffect(entry, at, left)
     local trap, rank = entry.trap, entry.rank
-    if not (ns.db.showEffects or ns.db.sounds[trap.key].ended ~= "none") then
+    local sounds = ns.db.sounds[trap.key]
+    if not (ns.db.showEffects or sounds.ended ~= "none" or sounds.early and sounds.early ~= "none") then
         return
     end
     local effectID = trap.effects[rank or 1]
@@ -282,30 +290,49 @@ local function StartEffect(entry, at, left)
     if effect.kind == "burn" then
         effect.victims = Victims(at)
     end
-    Traps.effects[trap.slot] = effect
+    Traps.effects[#Traps.effects + 1] = effect
     ns.Log("%s: %.1f s%s", effect.kind, effect.duration,
         effect.victims and (", on %d enemies seen"):format(#effect.victims) or "")
+    return effect
 end
 
--- A slot's effect is over (how it was told: why), with its trap's sound.
-local function EndEffect(slot, why)
-    local effect = Traps.effects[slot]
-    Traps.effects[slot] = nil
-    ns.Log("%s over (%s)", effect.kind, why)
-    ns.Display.EffectEnded(effect)
+-- An effect is over (how it was told: why), with its trap's sound. early:
+-- told by the enemy, not the clock, so before its time unless ON_TIME from
+-- it.
+local function EndEffect(effect, why, early)
+    for index, one in ipairs(Traps.effects) do
+        if one == effect then
+            table.remove(Traps.effects, index)
+            break
+        end
+    end
+    early = early and effect.start + effect.duration - GetTime() > ON_TIME or false
+    ns.Log("%s over (%s)%s", effect.kind, why, early and ", early" or "")
+    ns.Display.EffectEnded(effect, early)
     Changed()
+end
+
+-- The effects that test(effect) picks, as a list of their own: ending one
+-- changes Traps.effects.
+local function EffectsWhere(test)
+    local picked = {}
+    for _, effect in ipairs(Traps.effects) do
+        if test(effect) then
+            picked[#picked + 1] = effect
+        end
+    end
+    return picked
 end
 
 -- entry sprang (how it was told: why) at the time at, so it is gone. landed:
 -- its effect started (a freeze needs signs that it took hold); left: how
--- long it lasts, when read from its aura.
+-- long it lasts, when read from its aura. Returns its effect, if kept.
 local function Sprang(entry, why, at, landed, left)
     ns.Log("sprang (%s): %s", why, entry.trap.key)
     Traps.armed[entry.trap.slot] = nil
-    if landed then
-        StartEffect(entry, at, left)
-    end
+    local effect = landed and StartEffect(entry, at, left) or nil
     Changed()
+    return effect
 end
 
 -- Enemies whose auras can be read: the target, focus, mouseover and nameplates.
@@ -375,19 +402,19 @@ function Traps.OnUnitChanged(unit)
         return
     end
     local guid = Plain(UnitGUID(unit))
-    for slot, effect in pairs(Traps.effects) do
-        local victims = effect.victims
-        if victims and #victims > 0 then
-            local alive = false
-            for _, victim in ipairs(victims) do
-                if victim.guid and victim.guid == guid or not victim.guid and victim.unit == unit then
-                    victim.dead = true
-                end
-                alive = alive or not victim.dead
+    local burns = EffectsWhere(function(effect)
+        return effect.victims ~= nil and #effect.victims > 0
+    end)
+    for _, effect in ipairs(burns) do
+        local alive = false
+        for _, victim in ipairs(effect.victims) do
+            if victim.guid and victim.guid == guid or not victim.guid and victim.unit == unit then
+                victim.dead = true
             end
-            if not alive then
-                EndEffect(slot, "the enemies it burned died")
-            end
+            alive = alive or not victim.dead
+        end
+        if not alive then
+            EndEffect(effect, "the enemies it burned died", true)
         end
     end
 end
@@ -395,10 +422,11 @@ end
 -- PLAYER_REGEN_ENABLED: out of combat, the enemies a burn caught are dead or
 -- gone.
 function Traps.OnCombatEnded()
-    for slot, effect in pairs(Traps.effects) do
-        if effect.kind == "burn" then
-            EndEffect(slot, "you left combat")
-        end
+    local burns = EffectsWhere(function(effect)
+        return effect.kind == "burn"
+    end)
+    for _, effect in ipairs(burns) do
+        EndEffect(effect, "you left combat", true)
     end
 end
 
@@ -442,23 +470,54 @@ function Traps.OnSpellCast(unit, spellID)
     end
 end
 
+-- The client sends COMBAT_TEXT_UPDATE only about the unit
+-- C_CombatText.SetActiveUnit set. Blizzard's combat text sets it, but the
+-- game loads that only with "Show combat text" on (enableFloatingCombatText,
+-- Blizzard_SettingsDefinitions_Frame): logged in with it off, no combat text
+-- came at all (/htt probe, 2026-11-18), and the freeze ran its whole time.
+-- So the addon sets it to the hunter when nothing has (Blizzard's own sets
+-- "vehicle" in one, which is left alone).
+local function WatchCombatText()
+    local api = C_CombatText
+    if not (api and api.GetActiveUnit and api.SetActiveUnit) then
+        return
+    end
+    local ok, unit = pcall(api.GetActiveUnit)
+    if ok and not ns.IsSecret(unit) and (unit == nil or unit == "") then
+        ok = pcall(api.SetActiveUnit, "player")
+        ns.Log("combat text set to the player%s", ok and "" or " (refused)")
+    end
+end
+
 -- COMBAT_TEXT_UPDATE: its type only, what it shows is secret. The hunter got
 -- an aura (SPELL_AURA_START), or one of theirs faded (SPELL_AURA_END), which
--- ends a freeze.
+-- ends a freeze: of two, the one due to end first. One that ends none may
+-- be that of a freeze not told yet (Gone).
 function Traps.OnCombatText(kind)
     kind = Plain(kind)
     local now = GetTime()
-    local freeze = Traps.effects.frost
     if kind == "SPELL_AURA_START" then
         auraStartAt = now
-    elseif kind == "SPELL_AURA_END" and freeze and freeze.kind == "freeze" and now - freeze.start >= FREEZE_SETTLE then
-        EndEffect("frost", "an aura of yours faded")
+    elseif kind == "SPELL_AURA_END" then
+        local first
+        for _, effect in ipairs(Traps.effects) do
+            if effect.kind == "freeze" and now - effect.start >= FREEZE_SETTLE
+                and (not first or effect.start + effect.duration < first.start + first.duration) then
+                first = effect
+            end
+        end
+        if first then
+            EndEffect(first, "an aura of yours faded", true)
+        else
+            auraEndAt = now
+        end
     end
 end
 
 -- entry's SPELL_UPDATE_COOLDOWN came CONFIRM seconds ago: it went, unless a
 -- trap of its school was cast then. A Freezing Trap with signs that its
--- freeze took hold sprang, whenever that was; else, at its last moment, a
+-- freeze took hold sprang, whenever that was (and if an aura of the hunter's
+-- faded since, the enemy already broke free); else, at its last moment, a
 -- trap ran out.
 local function Gone(entry)
     local at = entry.goneAt
@@ -471,7 +530,10 @@ local function Gone(entry)
     local freezing = entry.trap.effect == "freeze"
     local held = math.abs(tookHoldAt - at) <= HOLD_WINDOW or math.abs(auraStartAt - at) <= HOLD_WINDOW
     if freezing and held then
-        Sprang(entry, "its cooldown event", at, true)
+        local freeze = Sprang(entry, "its cooldown event", at, true)
+        if freeze and auraEndAt - at >= FREEZE_SETTLE then
+            EndEffect(freeze, "an aura of yours faded", true)
+        end
     elseif entry.start + entry.duration - at <= LAST_MOMENT then
         ns.Log("ran out: %s", entry.trap.key)
         Traps.armed[slot] = nil
@@ -496,10 +558,11 @@ function Traps.Update()
             ns.Display.Warn(entry)
         end
     end
-    for slot, effect in pairs(Traps.effects) do
-        if now >= effect.start + effect.duration then
-            EndEffect(slot, "its time is up")
-        end
+    local over = EffectsWhere(function(effect)
+        return now >= effect.start + effect.duration
+    end)
+    for _, effect in ipairs(over) do
+        EndEffect(effect, "its time is up")
     end
     Changed()
 end
@@ -557,6 +620,7 @@ function Traps.Init()
         end
     end
 
+    WatchCombatText()
     local events = CreateFrame("Frame")
     ns.RegisterUnitEvents(events, { "player" }, "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED")
     ns.RegisterEvents(events, "UNIT_AURA", "UNIT_HEALTH", "NAME_PLATE_UNIT_REMOVED", "SPELL_UPDATE_COOLDOWN",
@@ -581,6 +645,7 @@ function Traps.Init()
         elseif event == "PLAYER_REGEN_ENABLED" then
             Traps.OnCombatEnded()
         elseif event == "PLAYER_ENTERING_WORLD" then
+            WatchCombatText()
             -- isInitialLogin, isReloadingUi
             Traps.Restore((select(2, ...)))
         else

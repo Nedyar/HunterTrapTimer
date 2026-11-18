@@ -81,13 +81,16 @@ for _, sound in ipairs(ns.SOUNDS) do
 end
 
 -- Each trap's sounds, by its key in Traps.LIST: as the warning before it
--- runs out starts (warn), and as its effect ends (ended). The user chose
--- them per trap (2026-11-17); by default the warning is the raid warning, as
--- before, and every effect's end the third alarm clock (the user's choice).
+-- runs out starts (warn), as its effect's time is up (ended), and, for an
+-- effect on an enemy (trap.endsEarly), as it ends before then (early). The
+-- user chose them per trap (2026-11-17), the early one for the freeze and
+-- the burn (2026-11-18); by default the warning is the raid warning, as
+-- before, and every effect's end the third alarm clock (the user's choice),
+-- early or not, as before.
 ns.DEFAULT_SOUNDS = {
-    immolation = { warn = "raidWarning", ended = "alarm3" },
+    immolation = { warn = "raidWarning", ended = "alarm3", early = "alarm3" },
     explosive = { warn = "raidWarning", ended = "alarm3" },
-    freezing = { warn = "raidWarning", ended = "alarm3" },
+    freezing = { warn = "raidWarning", ended = "alarm3", early = "alarm3" },
     frost = { warn = "raidWarning", ended = "alarm3" },
 }
 
@@ -147,6 +150,10 @@ local function SanitizeSounds(saved, silent)
         sounds[trap] = {
             warn = silent and "none" or soundByKey[one.warn] and one.warn or default.warn,
             ended = soundByKey[one.ended] and one.ended or default.ended,
+            -- Settings from before 0.3.1 had one sound for every end: an
+            -- early one keeps it.
+            early = default.early and (soundByKey[one.early] and one.early or soundByKey[one.ended] and one.ended
+                or default.early),
         }
     end
     return sounds

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- **Every effect keeps its own icon**: a new trap no longer hides the effect of the last one of its school (Explosive Trap's fire, say, while a new fire trap is down), and two effects of one trap at once each show (two of Frost Trap's ices on the ground). The row of icons grows as it needs to: the traps down first, then the effects, oldest first.
+- **Freezing Trap's freeze ends when the enemy breaks free, with the game's combat text off too**: logged in with "Show combat text" off, the game told addons nothing of the hunter's auras, so the freeze ran its whole time. The addon now asks for that news itself. An enemy that breaks free the moment it is caught (a sting's tick, your pet) ends the freeze as well.
+- **A sound for an effect that ends early**: Freezing Trap's freeze and Immolation Trap's burn can end before their time, as the enemy breaks free or dies; the Sounds page now has a sound for that, apart from the one for their time running out. It starts as the sound you had chosen for the effect's end.
+
 ## 0.3.0
 
 - **Notices every trap that springs, however far away you are**: the game tells addons when a trap goes, and which one, even when the enemy is out of sight, with enemy nameplates off, or in combat. A trap that sprang while you were away no longer keeps its countdown and its warning.

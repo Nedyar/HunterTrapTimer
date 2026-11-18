@@ -384,24 +384,23 @@ end
 
 -- The report's lines, with the last keep lines of the log (all of them when
 -- keep is nil).
--- Each slot's effect: "fire: burn, 12.0 s left, 1 of 2 enemies dead; frost: none".
+-- The effects that last, oldest first: "immolation's burn, 12.0 s left, 1
+-- of 2 enemies dead; frost's ice, 20.0 s left", or "none".
 local function EffectsText()
     local parts = {}
-    for _, slot in ipairs(ns.Traps.SLOTS) do
-        local effect, text = ns.Traps.effects[slot], "none"
-        if effect then
-            text = ("%s, %.1f s left"):format(effect.kind, effect.start + effect.duration - GetTime())
-            if effect.victims then
-                local dead = 0
-                for _, victim in ipairs(effect.victims) do
-                    dead = dead + (victim.dead and 1 or 0)
-                end
-                text = text .. (", %d of %d enemies dead"):format(dead, #effect.victims)
+    for _, effect in ipairs(ns.Traps.effects) do
+        local text = ("%s's %s, %.1f s left"):format(effect.trap.key, effect.kind,
+            effect.start + effect.duration - GetTime())
+        if effect.victims then
+            local dead = 0
+            for _, victim in ipairs(effect.victims) do
+                dead = dead + (victim.dead and 1 or 0)
             end
+            text = text .. (", %d of %d enemies dead"):format(dead, #effect.victims)
         end
-        parts[#parts + 1] = ("%s: %s"):format(slot, text)
+        parts[#parts + 1] = text
     end
-    return table.concat(parts, "; ")
+    return #parts > 0 and table.concat(parts, "; ") or "none"
 end
 
 local function ReportLines(keep)
@@ -416,6 +415,8 @@ local function ReportLines(keep)
     Add("In combat: %s. In a group: %s. Secret restrictions: %s; auras secret: %s; cooldowns secret: %s. Combat log restricted: %s.",
         Ask(InCombatLockdown), Ask(IsInGroup), Ask(S.HasSecretRestrictions), Ask(S.ShouldAurasBeSecret), Ask(S.ShouldCooldownsBeSecret),
         Ask(C_CombatLog and C_CombatLog.IsCombatLogRestricted))
+    Add("Combat text about: %s (show combat text: %s).", Ask(C_CombatText and C_CombatText.GetActiveUnit),
+        Ask(C_CVar.GetCVar, "enableFloatingCombatText"))
     Add("Armed: %s. Effects: %s.", ArmedText(), EffectsText())
     Add("")
 

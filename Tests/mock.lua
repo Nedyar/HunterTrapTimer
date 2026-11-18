@@ -476,7 +476,7 @@ function GetTotemInfo(slot) return false, "", 0, 0, 0 end
 -- A bitfield CVar's value is raw bytes, a control byte among them: build
 -- 70938 gave "\2G" for nameplateEnemyNpcAuraDisplay. Its bits are read with
 -- GetCVarBitfield, as Blizzard's nameplates do (M.cvarBits).
-M.cvars = { nameplateEnemyNpcAuraDisplay = "\2G", nameplateShowAllPersonalAuras = "0" }
+M.cvars = { nameplateEnemyNpcAuraDisplay = "\2G", nameplateShowAllPersonalAuras = "0", enableFloatingCombatText = "0" }
 M.cvarBits = { nameplateEnemyNpcAuraDisplay = { true, true, true } }
 C_CVar = {
     GetCVar = function(name) return M.cvars[name] end,
@@ -545,8 +545,18 @@ C_UnitAuras = {
         return C_UnitAuras.GetUnitAuraBySpellID("player", spellID)
     end,
 }
--- What the combat text shows is secret; only its type is not.
-C_CombatText = { GetCurrentEventInfo = function() return SECRET end }
+-- What the combat text shows is secret; only its type is not. The client
+-- sends it only about the unit SetActiveUnit set, none until then: Blizzard's
+-- combat text, which sets it, loads only with "Show combat text" on, off here.
+M.combatTextUnit = nil
+C_CombatText = {
+    GetCurrentEventInfo = function() return SECRET end,
+    GetActiveUnit = function() return M.combatTextUnit end,
+    SetActiveUnit = function(unit)
+        assert(unit == "player" or unit == "vehicle" or M.units[unit], "SetActiveUnit: not a unit token")
+        M.combatTextUnit = unit
+    end,
+}
 C_Secrets = {
     HasSecretRestrictions = function() return true end,
     ShouldAurasBeSecret = function() return M.aurasSecret end,
@@ -604,10 +614,17 @@ end
 -- aura first (the combat text's SPELL_AURA_START), and fires the event for
 -- spell 1324500 too; opts.aura or opts.hold false leaves either out.
 local FREEZING = { [1499] = true, [14310] = true, [14311] = true, [99001] = true }
+-- The hunter's combat text, of the type kind: sent only about the active
+-- unit, the hunter's.
+function M.CombatText(kind)
+    if M.combatTextUnit == "player" then
+        M.Fire("COMBAT_TEXT_UPDATE", kind)
+    end
+end
 function M.Spring(spellID, opts)
     opts = opts or {}
     if FREEZING[spellID] and opts.aura ~= false then
-        M.Fire("COMBAT_TEXT_UPDATE", "SPELL_AURA_START")
+        M.CombatText("SPELL_AURA_START")
     end
     if FREEZING[spellID] and opts.hold ~= false then
         M.Fire("SPELL_UPDATE_COOLDOWN", 1324500)
@@ -616,5 +633,5 @@ function M.Spring(spellID, opts)
 end
 -- An aura of the hunter's fades: the frozen enemy broke free, or not.
 function M.AuraFades(harmful)
-    M.Fire("COMBAT_TEXT_UPDATE", harmful and "SPELL_AURA_END_HARMFUL" or "SPELL_AURA_END")
+    M.CombatText(harmful and "SPELL_AURA_END_HARMFUL" or "SPELL_AURA_END")
 end

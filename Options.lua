@@ -249,7 +249,7 @@ end
 -- "ended"). Choosing one plays it, to hear it.
 local function CreateSoundChoice(page, x, y, trapKey, which)
     local dropdown = CreateFrame("DropdownButton", nil, page, "WowStyle1DropdownTemplate")
-    dropdown:SetWidth(190)
+    dropdown:SetWidth(145)
     dropdown:SetPoint("TOPLEFT", x, y)
     dropdown:SetupMenu(function(_, root)
         local function IsSelected(key)
@@ -286,17 +286,22 @@ local function CreateSoundsPage()
     intro:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -8)
     intro:SetWidth(620)
     intro:SetJustifyH("LEFT")
-    intro:SetText(L["Each trap's sounds: one as the warning before it runs out starts, one as its effect ends. Choosing a sound plays it."])
+    intro:SetText(L["Each trap's sounds: one as the warning before it runs out starts, one as its effect runs out, and one if the enemy breaks free or dies before then. Choosing a sound plays it."])
 
-    local columns = { { x = 200, which = "warn", title = L["Before it runs out"] },
-        { x = 410, which = "ended", title = L["When its effect ends"] } }
+    -- The last column only for the traps whose effect, on an enemy, can end
+    -- early.
+    local columns = { { x = 190, which = "warn", title = L["Before it runs out"] },
+        { x = 345, which = "ended", title = L["When its effect runs out"] },
+        { x = 500, which = "early", title = L["If it ends early"] } }
     for _, column in ipairs(columns) do
         local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        title:SetPoint("TOPLEFT", column.x + 4, -84)
+        title:SetPoint("TOPLEFT", column.x + 4, -92)
+        title:SetWidth(141)
+        title:SetJustifyH("LEFT")
         title:SetText(column.title)
     end
     for row, key in ipairs(SOUND_ROWS) do
-        local y = -108 - (row - 1) * 34
+        local y = -124 - (row - 1) * 34
         local trap
         for _, one in ipairs(ns.Traps.LIST) do
             trap = one.key == key and one or trap
@@ -304,9 +309,13 @@ local function CreateSoundsPage()
         -- The trap's name as the client gives it.
         local name = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
         name:SetPoint("TOPLEFT", 20, y - 6)
+        name:SetWidth(166)
+        name:SetJustifyH("LEFT")
         name:SetText(ns.Plain(C_Spell.GetSpellName(trap.spells[1])) or key)
         for _, column in ipairs(columns) do
-            CreateSoundChoice(page, column.x, y, key, column.which)
+            if column.which ~= "early" or trap.endsEarly then
+                CreateSoundChoice(page, column.x, y, key, column.which)
+            end
         end
     end
     return page
